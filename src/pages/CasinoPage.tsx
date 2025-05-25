@@ -73,6 +73,12 @@ const CasinoHeader = ({ user }: any) => {
                 <span>Money Tree</span>
               </Button>
             </Link>
+            <Link to="/wallet">
+              <Button variant="outline" size="sm" className="flex items-center space-x-2">
+                <Wallet className="w-4 h-4" />
+                <span>Wallet</span>
+              </Button>
+            </Link>
           </div>
         </div>
       </div>

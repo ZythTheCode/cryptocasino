@@ -267,6 +267,19 @@ const NavigationCard = () => {
               </CardContent>
             </Card>
           </Link>
+
+          <Link to="/wallet">
+            <Card className="hover:bg-blue-50 transition-colors cursor-pointer">
+              <CardContent className="p-6 text-center">
+                <Wallet className="w-12 h-12 text-blue-600 mx-auto mb-4" />
+                <h3 className="font-bold text-lg mb-2">Crypto Wallet</h3>
+                <p className="text-gray-600 text-sm">Manage your coins and chips</p>
+                <Button className="mt-4 w-full" variant="outline">
+                  Open Wallet
+                </Button>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
       </CardContent>
     </Card>

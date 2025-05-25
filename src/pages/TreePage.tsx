@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { TreePine, Coins, Home, Gamepad2 } from "lucide-react";
+import { TreePine, Coins, Home, Gamepad2, Wallet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
 
@@ -42,8 +42,9 @@ const TreePage = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <MoneyTreeCard user={user} setUser={setUser} />
           <EarningsStats user={user} />
-          <TreeUpgrades />
-          <CryptoWallet user={user} setUser={setUser} />
+          <TreeUpgrades user={user} setUser={setUser} />
+          <TreeBoosters user={user} setUser={setUser} />
+          <WalletCard user={user} />
         </div>
       </div>
     </div>
@@ -76,6 +77,12 @@ const TreeHeader = ({ user }: any) => {
                 <span>Casino</span>
               </Button>
             </Link>
+            <Link to="/wallet">
+              <Button variant="outline" size="sm" className="flex items-center space-x-2">
+                <Wallet className="w-4 h-4" />
+                <span>Wallet</span>
+              </Button>
+            </Link>
           </div>
         </div>
       </div>
@@ -104,7 +111,25 @@ const MoneyTreeCard = ({ user, setUser }: any) => {
   const claimCoins = () => {
     const now = Date.now();
     const timeSinceLastClaim = now - (user?.treeLastClaim || 0);
-    const coinsToAdd = Math.floor(timeSinceLastClaim / (10 * 60 * 1000));
+    const baseInterval = user?.upgrades?.faster_growth ? 8 * 60 * 1000 : 10 * 60 * 1000;
+    let coinsToAdd = Math.floor(timeSinceLastClaim / baseInterval);
+    
+    // Apply upgrades
+    if (user?.upgrades?.double_yield) {
+      coinsToAdd *= 2;
+    }
+
+    // Apply active boosters
+    const activeBoosters = JSON.parse(localStorage.getItem('activeBoosters') || '{}');
+    Object.entries(activeBoosters).forEach(([id, endTime]: [string, any]) => {
+      if (endTime > now) {
+        switch(id) {
+          case 'double_coins': coinsToAdd *= 2; break;
+          case 'triple_coins': coinsToAdd *= 3; break;
+          case 'super_boost': coinsToAdd *= 5; break;
+        }
+      }
+    });
     
     if (coinsToAdd > 0) {
       const updatedUser = {
@@ -201,7 +226,61 @@ const EarningsStats = ({ user }: any) => {
   );
 };
 
-const TreeUpgrades = () => {
+const TreeUpgrades = ({ user, setUser }: any) => {
+  const { toast } = useToast();
+
+  const upgrades = [
+    {
+      id: 'faster_growth',
+      name: 'Faster Growth',
+      description: '8 min per coin',
+      cost: 100,
+      effect: 0.8 // 20% faster
+    },
+    {
+      id: 'double_yield',
+      name: 'Double Yield',
+      description: '2 coins per harvest',
+      cost: 200,
+      effect: 2
+    },
+    {
+      id: 'auto_harvest',
+      name: 'Auto Harvester',
+      description: 'Auto claims every hour',
+      cost: 300,
+      effect: true
+    }
+  ];
+
+  const purchaseUpgrade = (upgrade: any) => {
+    if (user.coins < upgrade.cost) {
+      toast({
+        title: "Insufficient coins",
+        description: `You need ${upgrade.cost} coins to purchase this upgrade`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const updatedUser = {
+      ...user,
+      coins: user.coins - upgrade.cost,
+      upgrades: {
+        ...user.upgrades,
+        [upgrade.id]: true
+      }
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+    
+    toast({
+      title: "Upgrade Purchased!",
+      description: `You have acquired ${upgrade.name}!`,
+    });
+  };
+
   return (
     <Card className="bg-blue-50 border-blue-200">
       <CardHeader>
@@ -209,87 +288,52 @@ const TreeUpgrades = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <div className="flex justify-between items-center p-3 bg-white rounded border">
-            <div>
-              <p className="font-medium">Faster Growth</p>
-              <p className="text-sm text-gray-600">8 min per coin</p>
+          {upgrades.map((upgrade) => (
+            <div key={upgrade.id} className="flex justify-between items-center p-3 bg-white rounded border">
+              <div>
+                <p className="font-medium">{upgrade.name}</p>
+                <p className="text-sm text-gray-600">{upgrade.description}</p>
+                <p className="text-xs text-purple-600">Cost: {upgrade.cost} coins</p>
+              </div>
+              <Button
+                variant={user?.upgrades?.[upgrade.id] ? "ghost" : "outline"}
+                size="sm"
+                onClick={() => purchaseUpgrade(upgrade)}
+                disabled={user?.upgrades?.[upgrade.id]}
+              >
+                {user?.upgrades?.[upgrade.id] ? "Purchased" : "Buy"}
+              </Button>
             </div>
-            <Button variant="outline" size="sm" disabled>
-              Coming Soon
-            </Button>
-          </div>
-          <div className="flex justify-between items-center p-3 bg-white rounded border">
-            <div>
-              <p className="font-medium">Double Yield</p>
-              <p className="text-sm text-gray-600">2 coins per harvest</p>
-            </div>
-            <Button variant="outline" size="sm" disabled>
-              Coming Soon
-            </Button>
-          </div>
+          ))}
         </div>
       </CardContent>
     </Card>
   );
 };
 
-const CryptoWallet = ({ user, setUser }: any) => {
-  const [convertAmount, setConvertAmount] = useState(1);
-  const { toast } = useToast();
-
-  const handleConvert = () => {
-    if (convertAmount > user.coins) {
-      toast({
-        title: "Insufficient coins",
-        description: "You don't have enough coins to convert",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const updatedUser = {
-      ...user,
-      coins: user.coins - convertAmount,
-      chips: user.chips + (convertAmount * 10)
-    };
-
-    setUser(updatedUser);
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-    
-    const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-    users[user.username] = updatedUser;
-    localStorage.setItem('casinoUsers', JSON.stringify(users));
-
-    toast({
-      title: "Conversion successful!",
-      description: `Converted ${convertAmount} coins to ${convertAmount * 10} chips`,
-    });
-  };
-
+const WalletCard = ({ user }: any) => {
   return (
     <Card className="bg-purple-50 border-purple-200">
       <CardHeader>
-        <CardTitle className="text-purple-700">Convert to Chips</CardTitle>
+        <CardTitle className="text-purple-700">Quick Balance</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div className="text-center p-3 bg-white rounded border">
-            <p className="font-bold text-lg">1 Coin = 10 Casino Chips</p>
+          <div className="grid grid-cols-2 gap-4 p-3 bg-white rounded border">
+            <div className="text-center">
+              <p className="text-sm text-gray-600">Available Coins</p>
+              <p className="font-bold text-lg text-yellow-600">{user.coins}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm text-gray-600">Casino Chips</p>
+              <p className="font-bold text-lg text-green-600">{user.chips}</p>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Convert Amount:</label>
-            <input
-              type="number"
-              min="1"
-              max={user?.coins || 0}
-              value={convertAmount}
-              onChange={(e) => setConvertAmount(parseInt(e.target.value) || 1)}
-              className="w-full px-3 py-2 border rounded-md"
-            />
-          </div>
-          <Button onClick={handleConvert} className="w-full" disabled={!user?.coins}>
-            Convert to {convertAmount * 10} Chips
-          </Button>
+          <Link to="/wallet">
+            <Button className="w-full">
+              Manage Wallet
+            </Button>
+          </Link>
         </div>
       </CardContent>
     </Card>
@@ -297,3 +341,138 @@ const CryptoWallet = ({ user, setUser }: any) => {
 };
 
 export default TreePage;
+
+
+const TreeBoosters = ({ user, setUser }: any) => {
+  const { toast } = useToast();
+  const [activeBoosters, setActiveBoosters] = useState<{[key: string]: number}>(
+    JSON.parse(localStorage.getItem('activeBoosters') || '{}')
+  );
+
+  const boosters = [
+    {
+      id: 'double_coins',
+      name: '2x Coins',
+      description: 'Double coins for 1 hour',
+      duration: 3600000, // 1 hour in ms
+      cost: 50,
+      multiplier: 2
+    },
+    {
+      id: 'triple_coins',
+      name: '3x Coins',
+      description: 'Triple coins for 30 minutes',
+      duration: 1800000, // 30 minutes in ms
+      cost: 100,
+      multiplier: 3
+    },
+    {
+      id: 'super_boost',
+      name: '5x Coins',
+      description: 'Five times coins for 10 minutes',
+      duration: 600000, // 10 minutes in ms
+      cost: 150,
+      multiplier: 5
+    }
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const updatedBoosters = { ...activeBoosters };
+      let changed = false;
+
+      Object.entries(updatedBoosters).forEach(([id, endTime]) => {
+        if (endTime < now) {
+          delete updatedBoosters[id];
+          changed = true;
+          toast({
+            title: "Booster Expired",
+            description: `The ${boosters.find(b => b.id === id)?.name} booster has expired!`,
+          });
+        }
+      });
+
+      if (changed) {
+        setActiveBoosters(updatedBoosters);
+        localStorage.setItem('activeBoosters', JSON.stringify(updatedBoosters));
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeBoosters]);
+
+  const activateBooster = (booster: any) => {
+    if (user.coins < booster.cost) {
+      toast({
+        title: "Insufficient coins",
+        description: `You need ${booster.cost} coins to activate this booster`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const now = Date.now();
+    const updatedBoosters = {
+      ...activeBoosters,
+      [booster.id]: now + booster.duration
+    };
+
+    const updatedUser = {
+      ...user,
+      coins: user.coins - booster.cost
+    };
+
+    setActiveBoosters(updatedBoosters);
+    setUser(updatedUser);
+    
+    localStorage.setItem('activeBoosters', JSON.stringify(updatedBoosters));
+    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+
+    toast({
+      title: "Booster Activated!",
+      description: `${booster.name} is now active!`,
+    });
+  };
+
+  const getTimeRemaining = (endTime: number) => {
+    const remaining = Math.max(0, endTime - Date.now());
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <Card className="bg-purple-50 border-purple-200">
+      <CardHeader>
+        <CardTitle className="text-purple-700">Boosters</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          {boosters.map((booster) => (
+            <div key={booster.id} className="flex justify-between items-center p-3 bg-white rounded border">
+              <div>
+                <p className="font-medium">{booster.name}</p>
+                <p className="text-sm text-gray-600">{booster.description}</p>
+                <p className="text-xs text-purple-600">Cost: {booster.cost} coins</p>
+                {activeBoosters[booster.id] && (
+                  <p className="text-xs text-green-600">
+                    Time remaining: {getTimeRemaining(activeBoosters[booster.id])}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant={activeBoosters[booster.id] ? "ghost" : "outline"}
+                size="sm"
+                onClick={() => activateBooster(booster)}
+                disabled={!!activeBoosters[booster.id]}
+              >
+                {activeBoosters[booster.id] ? "Active" : "Activate"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
