@@ -1,9 +1,9 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Coins, TreePine, Gamepad2, Settings, Wallet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Link } from "react-router-dom";
 
 const Index = () => {
   const [user, setUser] = useState<any>(null);
@@ -30,7 +30,7 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
       <Header user={user} setUser={setUser} setShowLogin={setShowLogin} />
-      <CasinoDashboard user={user} setUser={setUser} />
+      <MainDashboard user={user} />
     </div>
   );
 };
@@ -191,213 +191,104 @@ const Header = ({ user, setUser, setShowLogin }: any) => {
   );
 };
 
-const CasinoDashboard = ({ user, setUser }: any) => {
+const MainDashboard = ({ user }: any) => {
   return (
     <div className="max-w-7xl mx-auto p-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <MoneyTree user={user} setUser={setUser} />
-        <WalletCard user={user} setUser={setUser} />
-        <GamesGrid />
-        {user?.isAdmin && <AdminPanel />}
+        <QuickStats user={user} />
+        <NavigationCard />
+        {user?.isAdmin && <AdminQuickAccess />}
       </div>
     </div>
   );
 };
 
-const MoneyTree = ({ user, setUser }: any) => {
-  const [timeToNext, setTimeToNext] = useState('');
-  const { toast } = useToast();
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const timeSinceLastClaim = now - (user?.treeLastClaim || now);
-      const timeToNextCoin = 10 * 60 * 1000 - (timeSinceLastClaim % (10 * 60 * 1000));
-      
-      const minutes = Math.floor(timeToNextCoin / 60000);
-      const seconds = Math.floor((timeToNextCoin % 60000) / 1000);
-      setTimeToNext(`${minutes}:${seconds.toString().padStart(2, '0')}`);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [user]);
-
-  const claimCoins = () => {
-    const now = Date.now();
-    const timeSinceLastClaim = now - (user?.treeLastClaim || 0);
-    const coinsToAdd = Math.floor(timeSinceLastClaim / (10 * 60 * 1000));
-    
-    if (coinsToAdd > 0) {
-      const updatedUser = {
-        ...user,
-        coins: user.coins + coinsToAdd,
-        treeLastClaim: now
-      };
-      
-      setUser(updatedUser);
-      localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-      
-      const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-      users[user.username] = updatedUser;
-      localStorage.setItem('casinoUsers', JSON.stringify(users));
-      
-      toast({
-        title: "Coins Claimed!",
-        description: `You earned ${coinsToAdd} coins from your Money Tree!`,
-      });
-    } else {
-      toast({
-        title: "No coins ready",
-        description: "Wait for the next coin to be ready!",
-        variant: "destructive",
-      });
-    }
-  };
-
+const QuickStats = ({ user }: any) => {
   return (
-    <Card className="bg-green-50 border-green-200">
+    <Card className="bg-gradient-to-r from-yellow-50 to-green-50 border-yellow-200">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <TreePine className="w-6 h-6 text-green-600" />
-          <span>Money Tree</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="text-center">
-          <div className="text-4xl mb-4">🌳</div>
-          <p className="text-sm text-gray-600 mb-2">Next coin in:</p>
-          <p className="text-xl font-bold text-green-600 mb-4">{timeToNext}</p>
-          <Button onClick={claimCoins} className="w-full">
-            Claim Coins
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-const WalletCard = ({ user, setUser }: any) => {
-  const [convertAmount, setConvertAmount] = useState(1);
-  const { toast } = useToast();
-
-  const handleConvert = () => {
-    if (convertAmount > user.coins) {
-      toast({
-        title: "Insufficient coins",
-        description: "You don't have enough coins to convert",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const updatedUser = {
-      ...user,
-      coins: user.coins - convertAmount,
-      chips: user.chips + (convertAmount * 10)
-    };
-
-    setUser(updatedUser);
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-    
-    const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-    users[user.username] = updatedUser;
-    localStorage.setItem('casinoUsers', JSON.stringify(users));
-
-    toast({
-      title: "Conversion successful!",
-      description: `Converted ${convertAmount} coins to ${convertAmount * 10} chips`,
-    });
-  };
-
-  return (
-    <Card className="bg-blue-50 border-blue-200">
-      <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <Wallet className="w-6 h-6 text-blue-600" />
-          <span>Wallet</span>
-        </CardTitle>
+        <CardTitle className="text-yellow-700">Your Crypto Empire</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div>
-            <p className="text-sm text-gray-600">Exchange Rate:</p>
-            <p className="font-bold">1 Coin = 10 Chips</p>
+          <div className="flex justify-between items-center">
+            <span className="flex items-center space-x-2">
+              <Coins className="w-4 h-4 text-yellow-600" />
+              <span>Coins</span>
+            </span>
+            <span className="font-bold text-yellow-600">{user?.coins || 0}</span>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Convert Coins:</label>
-            <input
-              type="number"
-              min="1"
-              max={user?.coins || 0}
-              value={convertAmount}
-              onChange={(e) => setConvertAmount(parseInt(e.target.value) || 1)}
-              className="w-full px-3 py-2 border rounded-md"
-            />
+          <div className="flex justify-between items-center">
+            <span className="flex items-center space-x-2">
+              <Wallet className="w-4 h-4 text-green-600" />
+              <span>Chips</span>
+            </span>
+            <span className="font-bold text-green-600">{user?.chips || 0}</span>
           </div>
-          <Button onClick={handleConvert} className="w-full" disabled={!user?.coins}>
-            Convert to {convertAmount * 10} Chips
-          </Button>
+          <div className="text-center pt-4">
+            <p className="text-sm text-gray-600">Welcome back, {user?.username}!</p>
+          </div>
         </div>
       </CardContent>
     </Card>
   );
 };
 
-const GamesGrid = () => {
-  const games = [
-    { name: 'Color Game', icon: '🎨', path: '/color-game' },
-    { name: 'Blackjack', icon: '🃏', path: '/blackjack' },
-    { name: 'Poker', icon: '♠️', path: '/poker' },
-    { name: 'Slot Machine', icon: '🎰', path: '/slots' },
-    { name: 'Baccarat', icon: '🎲', path: '/baccarat' },
-  ];
-
+const NavigationCard = () => {
   return (
     <Card className="lg:col-span-2">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <Gamepad2 className="w-6 h-6" />
-          <span>Casino Games</span>
-        </CardTitle>
+        <CardTitle>Choose Your Adventure</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {games.map((game) => (
-            <Button
-              key={game.name}
-              variant="outline"
-              className="h-20 flex flex-col items-center justify-center space-y-2"
-              onClick={() => alert(`${game.name} coming soon!`)}
-            >
-              <span className="text-2xl">{game.icon}</span>
-              <span className="text-sm">{game.name}</span>
-            </Button>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Link to="/tree">
+            <Card className="hover:bg-green-50 transition-colors cursor-pointer">
+              <CardContent className="p-6 text-center">
+                <TreePine className="w-12 h-12 text-green-600 mx-auto mb-4" />
+                <h3 className="font-bold text-lg mb-2">Money Tree Farm</h3>
+                <p className="text-gray-600 text-sm">Grow your crypto coins passively</p>
+                <Button className="mt-4 w-full" variant="outline">
+                  Visit Tree
+                </Button>
+              </CardContent>
+            </Card>
+          </Link>
+          
+          <Link to="/casino">
+            <Card className="hover:bg-purple-50 transition-colors cursor-pointer">
+              <CardContent className="p-6 text-center">
+                <Gamepad2 className="w-12 h-12 text-purple-600 mx-auto mb-4" />
+                <h3 className="font-bold text-lg mb-2">Casino Games</h3>
+                <p className="text-gray-600 text-sm">Play games and win big</p>
+                <Button className="mt-4 w-full" variant="outline">
+                  Enter Casino
+                </Button>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
       </CardContent>
     </Card>
   );
 };
 
-const AdminPanel = () => {
+const AdminQuickAccess = () => {
   return (
     <Card className="border-red-200 bg-red-50">
       <CardHeader>
         <CardTitle className="flex items-center space-x-2 text-red-600">
           <Settings className="w-6 h-6" />
-          <span>Admin Panel</span>
+          <span>Admin Access</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
           <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
-            View All Users
+            Manage Users
           </Button>
           <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
-            Game Logs
-          </Button>
-          <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
-            Manage Balances
+            View Reports
           </Button>
         </div>
       </CardContent>
