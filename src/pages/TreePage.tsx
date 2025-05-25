@@ -92,44 +92,70 @@ const TreeHeader = ({ user }: any) => {
 
 const MoneyTreeCard = ({ user, setUser }: any) => {
   const [timeToNext, setTimeToNext] = useState('');
+  const [coinsAvailable, setCoinsAvailable] = useState(0);
   const { toast } = useToast();
+  const [activeBoosters, setActiveBoosters] = useState<{[key: string]: number}>(
+    JSON.parse(localStorage.getItem('activeBoosters') || '{}')
+  );
 
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
       const timeSinceLastClaim = now - (user?.treeLastClaim || now);
-      const timeToNextCoin = 10 * 60 * 1000 - (timeSinceLastClaim % (10 * 60 * 1000));
+      const baseInterval = user?.upgrades?.faster_growth ? 8 * 60 * 1000 : 10 * 60 * 1000;
       
+      // Apply speed booster if active
+      let effectiveInterval = baseInterval;
+      if (activeBoosters['speed_boost'] && activeBoosters['speed_boost'] > now) {
+        effectiveInterval = baseInterval / 2;
+      }
+      
+      const timeToNextCoin = effectiveInterval - (timeSinceLastClaim % effectiveInterval);
+      const coinsToCollect = Math.floor(timeSinceLastClaim / effectiveInterval);
+      
+      setCoinsAvailable(coinsToCollect);
       const minutes = Math.floor(timeToNextCoin / 60000);
       const seconds = Math.floor((timeToNextCoin % 60000) / 1000);
       setTimeToNext(`${minutes}:${seconds.toString().padStart(2, '0')}`);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, activeBoosters]);
 
   const claimCoins = () => {
     const now = Date.now();
     const timeSinceLastClaim = now - (user?.treeLastClaim || 0);
     const baseInterval = user?.upgrades?.faster_growth ? 8 * 60 * 1000 : 10 * 60 * 1000;
-    let coinsToAdd = Math.floor(timeSinceLastClaim / baseInterval);
+    const maxStorage = (user?.upgrades?.storage_level || 1) * 10;
+    const coinsPerHarvest = (user?.upgrades?.tree_level || 1);
     
-    // Apply upgrades
-    if (user?.upgrades?.double_yield) {
-      coinsToAdd *= 2;
+    let coinsToAdd = Math.floor(timeSinceLastClaim / baseInterval) * coinsPerHarvest;
+    
+    // Apply storage limit
+    coinsToAdd = Math.min(coinsToAdd, maxStorage);
+    
+    if (coinsToAdd === 0) {
+      toast({
+        title: "No coins available",
+        description: "Wait for the next harvest or upgrade storage capacity!",
+        variant: "destructive"
+      });
+      return;
     }
 
     // Apply active boosters
-    const activeBoosters = JSON.parse(localStorage.getItem('activeBoosters') || '{}');
+    let totalMultiplier = 1;
     Object.entries(activeBoosters).forEach(([id, endTime]: [string, any]) => {
       if (endTime > now) {
         switch(id) {
-          case 'double_coins': coinsToAdd *= 2; break;
-          case 'triple_coins': coinsToAdd *= 3; break;
-          case 'super_boost': coinsToAdd *= 5; break;
+          case 'double_coins': totalMultiplier *= 2; break;
+          case 'triple_coins': totalMultiplier *= 3; break;
+          case 'super_boost': totalMultiplier *= 5; break;
         }
       }
     });
+    
+    coinsToAdd *= totalMultiplier;
     
     if (coinsToAdd > 0) {
       const updatedUser = {
@@ -168,14 +194,41 @@ const MoneyTreeCard = ({ user, setUser }: any) => {
       </CardHeader>
       <CardContent>
         <div className="text-center">
-          <div className="text-8xl mb-6">🌳</div>
+          <div className="relative">
+            <div className="text-8xl mb-6">🌳</div>
+            <div className="absolute top-0 right-0 flex flex-col gap-1">
+              {Object.entries(activeBoosters).map(([id, endTime]) => {
+                if (endTime > Date.now()) {
+                  const timeLeft = Math.ceil((endTime - Date.now()) / 60000);
+                  return (
+                    <div key={id} className="bg-purple-600/80 text-white px-2 py-1 rounded text-sm">
+                      {id === 'double_coins' && '2x Coins'}
+                      {id === 'triple_coins' && '3x Coins'}
+                      {id === 'super_boost' && '5x Coins'}
+                      {id === 'speed_boost' && '2x Speed'}
+                      <span className="ml-2">{timeLeft}m</span>
+                    </div>
+                  );
+                }
+                return null;
+              })}
+            </div>
+          </div>
           <div className="mb-6">
             <p className="text-lg text-gray-600 mb-2">Next coin ready in:</p>
             <p className="text-3xl font-bold text-green-600 mb-2">{timeToNext}</p>
-            <p className="text-sm text-gray-500">1 coin every 10 minutes</p>
+            <p className="text-sm text-gray-500">
+              1 coin every {user?.upgrades?.faster_growth ? '8' : '10'} minutes
+              {activeBoosters['speed_boost'] && activeBoosters['speed_boost'] > Date.now() && ' (2x Speed active!)'}
+            </p>
           </div>
-          <Button onClick={claimCoins} size="lg" className="w-full">
-            🪙 Claim Available Coins
+          <Button 
+            onClick={claimCoins} 
+            size="lg" 
+            className="w-full"
+            disabled={coinsAvailable === 0}
+          >
+            🪙 {coinsAvailable > 0 ? `Collect ${coinsAvailable} Coins` : 'No Coins Available'}
           </Button>
         </div>
       </CardContent>
@@ -187,11 +240,21 @@ const EarningsStats = ({ user }: any) => {
   const calculateStats = () => {
     const now = Date.now();
     const timeSinceLastClaim = now - (user?.treeLastClaim || now);
-    const availableCoins = Math.floor(timeSinceLastClaim / (10 * 60 * 1000));
+    const baseInterval = user?.upgrades?.faster_growth ? 8 * 60 * 1000 : 10 * 60 * 1000;
+    const maxStorage = (user?.upgrades?.storage_level || 1) * 10;
+    const coinsPerHarvest = (user?.upgrades?.tree_level || 1);
+    const availableCoins = Math.min(
+      Math.floor(timeSinceLastClaim / baseInterval) * coinsPerHarvest,
+      maxStorage
+    );
     
     return {
       availableCoins,
-      dailyPotential: 144, // 24 hours * 6 coins per hour
+      treeLevel: user?.upgrades?.tree_level || 1,
+      storageLevel: user?.upgrades?.storage_level || 1,
+      maxStorage,
+      minutesPerHarvest: baseInterval / 60000,
+      coinsPerHarvest,
       totalEarned: user?.coins || 0
     };
   };
@@ -203,18 +266,30 @@ const EarningsStats = ({ user }: any) => {
       <CardHeader>
         <CardTitle className="flex items-center space-x-2 text-yellow-700">
           <Coins className="w-6 h-6" />
-          <span>Earnings Stats</span>
+          <span>Tree Stats</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
           <div className="flex justify-between">
-            <span className="text-gray-600">Available Now:</span>
-            <span className="font-bold text-green-600">{stats.availableCoins} coins</span>
+            <span className="text-gray-600">Tree Level:</span>
+            <span className="font-bold text-green-600">Level {stats.treeLevel}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-600">Daily Potential:</span>
-            <span className="font-bold">{stats.dailyPotential} coins</span>
+            <span className="text-gray-600">Storage Level:</span>
+            <span className="font-bold text-blue-600">Level {stats.storageLevel}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-600">Coins per Harvest:</span>
+            <span className="font-bold text-purple-600">{stats.coinsPerHarvest}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-600">Storage Capacity:</span>
+            <span className="font-bold text-orange-600">{stats.availableCoins}/{stats.maxStorage}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-600">Minutes per Harvest:</span>
+            <span className="font-bold">{stats.minutesPerHarvest} min</span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-600">Total Balance:</span>
@@ -231,25 +306,29 @@ const TreeUpgrades = ({ user, setUser }: any) => {
 
   const upgrades = [
     {
-      id: 'faster_growth',
-      name: 'Faster Growth',
-      description: '8 min per coin',
-      cost: 100,
-      effect: 0.8 // 20% faster
+      id: 'tree_level',
+      name: 'Tree Level',
+      description: '+1 coin per harvest',
+      baseCost: 100,
+      getNextLevelCost: (currentLevel) => Math.floor(100 * Math.pow(1.5, currentLevel - 1)),
+      maxLevel: 10
     },
     {
-      id: 'double_yield',
-      name: 'Double Yield',
-      description: '2 coins per harvest',
-      cost: 200,
-      effect: 2
+      id: 'storage_level',
+      name: 'Storage Level',
+      description: '+10 max storage',
+      baseCost: 150,
+      getNextLevelCost: (currentLevel) => Math.floor(150 * Math.pow(1.5, currentLevel - 1)),
+      maxLevel: 10
     },
     {
-      id: 'auto_harvest',
-      name: 'Auto Harvester',
-      description: 'Auto claims every hour',
-      cost: 300,
-      effect: true
+      id: 'soil_level',
+      name: 'Soil Quality',
+      description: '-30s harvest time',
+      baseCost: 200,
+      getNextLevelCost: (currentLevel) => Math.floor(200 * Math.pow(1.5, currentLevel - 1)),
+      maxLevel: 10,
+      isAvailable: (currentLevel, baseInterval) => (baseInterval - (currentLevel * 30000)) >= 300000 // Stop at 5 minutes
     }
   ];
 
@@ -350,6 +429,14 @@ const TreeBoosters = ({ user, setUser }: any) => {
   );
 
   const boosters = [
+    {
+      id: 'speed_boost',
+      name: '2x Speed',
+      description: 'Collect coins twice as fast for 30 minutes',
+      duration: 1800000, // 30 minutes in ms
+      cost: 75,
+      multiplier: 2
+    },
     {
       id: 'double_coins',
       name: '2x Coins',
