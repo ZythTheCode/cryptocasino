@@ -1,52 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Coins, TreePine, Gamepad2, Settings, Wallet } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { TreePine, Gamepad2, Wallet, Settings, Home } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
-
-// Import calculateTreeLevel function for admin features
-const calculateTreeLevel = (upgrades: any) => {
-  if (!upgrades) return 1;
-  const tier = upgrades.tier || 1;
-  return tier; // Tree level directly matches the tier
-};
+import { useLocation } from "react-router-dom";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const Index = () => {
-  const [user, setUser] = useState<any>(null);
-  const [showLogin, setShowLogin] = useState(true);
+  const [users, setUsers] = useState<any>({});
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLogin, setIsLogin] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
+    const savedUsers = localStorage.getItem("casinoUsers");
+    if (savedUsers) {
+      setUsers(JSON.parse(savedUsers));
+    }
+
+    const savedUser = localStorage.getItem("casinoUser");
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      setShowLogin(false);
+      setCurrentUser(JSON.parse(savedUser));
     }
   }, []);
-
-  const handleLogin = (userData: any) => {
-    setUser(userData);
-    setShowLogin(false);
-    localStorage.setItem('casinoUser', JSON.stringify(userData));
-  };
-
-  if (showLogin) {
-    return <LoginScreen onLogin={handleLogin} />;
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
-      <Header user={user} setUser={setUser} setShowLogin={setShowLogin} />
-      <MainDashboard user={user} />
-    </div>
-  );
-};
-
-const LoginScreen = ({ onLogin }: { onLogin: (user: any) => void }) => {
-  const [isRegister, setIsRegister] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const { toast } = useToast();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,12 +42,61 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: any) => void }) => {
       return;
     }
 
-    const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
+    if (isLogin) {
+      // Login logic
+      const user = users[username];
+      if (!user) {
+        toast({
+          title: "Login Failed",
+          description: "Invalid username or password",
+          variant: "destructive",
+        });
+        return;
+      }
 
-    if (isRegister) {
+      // Check password first
+      if (user.password !== password) {
+        toast({
+          title: "Login Failed",
+          description: "Invalid username or password",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Then check if user is banned BEFORE allowing login
+      if (user.banned === true) {
+        const bannedDate = user.bannedAt ? new Date(user.bannedAt).toLocaleDateString() : "Unknown";
+        toast({
+          title: "Account Banned",
+          description: `Your account has been banned from the casino. Banned on: ${bannedDate}. Please contact support.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Only proceed with login if user is not banned
+      // Update last login
+      const updatedUser = {
+        ...user,
+        lastLogin: Date.now(),
+      };
+
+      const updatedUsers = { ...users, [username]: updatedUser };
+      setUsers(updatedUsers);
+      localStorage.setItem("casinoUsers", JSON.stringify(updatedUsers));
+      localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+      setCurrentUser(updatedUser);
+
+      toast({
+        title: "Login Successful",
+        description: `Welcome back, ${username}!`,
+      });
+    } else {
+      // Register logic
       if (users[username]) {
         toast({
-          title: "Error",
+          title: "Registration Failed",
           description: "Username already exists",
           variant: "destructive",
         });
@@ -74,167 +105,246 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: any) => void }) => {
 
       const newUser = {
         username,
-        password, // In real app, this would be hashed
-        coins: username === 'admin' ? 10000 : 100, // More coins for admin
-        chips: username === 'admin' ? 1000 : 0,
+        password,
+        coins: 0,
+        chips: 0,
+        upgrades: {
+          treeLevel: 1,
+        },
+        activeBoosters: [],
         lastLogin: Date.now(),
-        isAdmin: username === 'admin',
-        treeLastClaim: Date.now(),
-        upgrades: {}
+        isAdmin: username === "admin",
       };
 
-      users[username] = newUser;
-      localStorage.setItem('casinoUsers', JSON.stringify(users));
-      onLogin(newUser);
+      const updatedUsers = { ...users, [username]: newUser };
+      setUsers(updatedUsers);
+      localStorage.setItem("casinoUsers", JSON.stringify(updatedUsers));
+      localStorage.setItem("casinoUser", JSON.stringify(newUser));
+      setCurrentUser(newUser);
 
       toast({
-        title: "Success",
-        description: "Account created successfully!",
+        title: "Registration Successful",
+        description: `Welcome, ${username}!`,
       });
-    } else {
-      const user = users[username];
-      if (!user || user.password !== password) {
-        toast({
-          title: "Error",
-          description: "Invalid username or password",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Calculate offline coins
-      const timeDiff = Date.now() - user.lastLogin;
-      const offlineCoins = Math.floor(timeDiff / (10 * 60 * 1000)); // 1 coin per 10 minutes
-      user.coins += offlineCoins;
-      user.lastLogin = Date.now();
-
-      users[username] = user;
-      localStorage.setItem('casinoUsers', JSON.stringify(users));
-      onLogin(user);
-
-      if (offlineCoins > 0) {
-        toast({
-          title: "Welcome back!",
-          description: `You earned ${offlineCoins} coins while away!`,
-        });
-      }
     }
+
+    setUsername("");
+    setPassword("");
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("casinoUser");
+    setCurrentUser(null);
+    setUsername("");
+    setPassword("");
+    toast({
+      title: "Logged Out",
+      description: "You have been logged out successfully",
+    });
+  };
+
+  if (currentUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900">
+        <header className="bg-gradient-to-r from-blue-800/90 to-purple-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
+          <div className="max-w-7xl mx-auto flex justify-between items-center">
+            <h1 className="text-3xl font-bold text-white flex items-center space-x-3">
+              <Home className="w-8 h-8 text-blue-400" />
+              <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                ₵ Checkels Dashboard
+              </span>
+            </h1>
+            <div className="flex items-center space-x-6">
+              <div className="flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
+                <div className="flex items-center space-x-2">
+                  <CheckelsIcon className="w-5 h-5 text-yellow-400" />
+                  <span className="text-yellow-100 font-semibold">
+                    {(currentUser?.coins || 0).toFixed(2)} ₵ Checkels
+                  </span>
+                </div>
+                <div className="w-px h-6 bg-white/20"></div>
+                <div className="flex items-center space-x-2">
+                  <ChipsIcon className="w-5 h-5 text-green-400" />
+                  <span className="text-green-100 font-semibold">
+                    {(currentUser?.chips || 0).toFixed(2)} Chips
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center space-x-3">
+                <span className="text-white/90 font-medium">Welcome, {currentUser?.username}</span>
+                <Button
+                  onClick={handleLogout}
+                  variant="outline"
+                  size="sm"
+                  className="bg-red-500/20 border-red-400/30 text-red-100 hover:bg-red-500/30"
+                >
+                  Logout
+                </Button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="max-w-7xl mx-auto p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <WelcomeCard user={currentUser} />
+            <QuickStatsCard user={currentUser} />
+            <NavigationCard />
+            {currentUser?.isAdmin && <AdminPanel />}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-center text-2xl font-bold">
-            🎰 Crypto Casino
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
+      <Card className="w-full max-w-md bg-white/10 backdrop-blur-lg border-white/20">
+        <CardHeader className="text-center">
+          <CardTitle className="text-3xl font-bold text-white flex items-center justify-center space-x-3">
+            <CheckelsIcon className="w-8 h-8 text-yellow-400" />
+            <span className="bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
+              ₵ Checkels
+            </span>
           </CardTitle>
+          <p className="text-white/80 mt-2">
+            {isLogin ? "Welcome back!" : "Join the ₵ Checkels ecosystem"}
+          </p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Username</label>
-              <input
+              <Label htmlFor="username" className="text-white/90">
+                Username
+              </Label>
+              <Input
+                id="username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 border rounded-md"
-                placeholder="Enter username"
+                className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                placeholder="Enter your username"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Password</label>
-              <input
+              <Label htmlFor="password" className="text-white/90">
+                Password
+              </Label>
+              <Input
+                id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border rounded-md"
-                placeholder="Enter password"
+                className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                placeholder="Enter your password"
               />
             </div>
-            <Button type="submit" className="w-full">
-              {isRegister ? 'Register' : 'Login'}
-            </Button>
-            <Button 
-              type="button" 
-              variant="outline" 
-              className="w-full"
-              onClick={() => setIsRegister(!isRegister)}
+            <Button
+              type="submit"
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
             >
-              {isRegister ? 'Already have an account? Login' : 'Need an account? Register'}
+              {isLogin ? "Login" : "Register"}
             </Button>
           </form>
+          <div className="mt-4 text-center">
+            <Button
+              variant="link"
+              onClick={() => setIsLogin(!isLogin)}
+              className="text-white/80 hover:text-white"
+            >
+              {isLogin
+                ? "Don't have an account? Register"
+                : "Already have an account? Login"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>
   );
 };
 
-const Header = ({ user, setUser, setShowLogin }: any) => {
-  const handleLogout = () => {
-    localStorage.removeItem('casinoUser');
-    setUser(null);
-    setShowLogin(true);
+const WelcomeCard = ({ user }: any) => {
+  const calculateTreeLevel = (upgrades: any) => {
+    if (!upgrades) return 1;
+    return upgrades.treeLevel || 1;
   };
 
-  return (
-    <header className="bg-black/20 backdrop-blur-sm p-4">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-white">🎰 Crypto Casino</h1>
-        <div className="flex items-center space-x-6 text-white">
-          <div className="flex items-center space-x-2">
-            <Coins className="w-5 h-5 text-yellow-400" />
-            <span>{user?.coins || 0} ₵checkels</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Wallet className="w-5 h-5 text-green-400" />
-            <span>{user?.chips || 0} Chips</span>
-          </div>
-          <span>Welcome, {user?.username}</span>
-          <Button variant="outline" size="sm" onClick={handleLogout}>
-            Logout
-          </Button>
-        </div>
-      </div>
-    </header>
-  );
-};
+  const getTreeImage = (level: number) => {
+    if (level >= 80) return "🌳";
+    if (level >= 60) return "🌲";
+    if (level >= 40) return "🌱";
+    if (level >= 20) return "🪴";
+    return "🌿";
+  };
 
-const MainDashboard = ({ user }: any) => {
-  return (
-    <div className="max-w-7xl mx-auto p-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <QuickStats user={user} />
-        <NavigationCard />
-        {user?.isAdmin && <AdminQuickAccess />}
-      </div>
-    </div>
-  );
-};
+  const level = calculateTreeLevel(user?.upgrades);
 
-const QuickStats = ({ user }: any) => {
   return (
-    <Card className="bg-gradient-to-r from-yellow-50 to-green-50 border-yellow-200">
+    <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 shadow-lg">
       <CardHeader>
-        <CardTitle className="text-yellow-700">Your Crypto Empire</CardTitle>
+        <CardTitle className="text-green-700 flex items-center space-x-2">
+          <span className="text-2xl">{getTreeImage(level)}</span>
+          <span>Welcome Back!</span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="flex items-center space-x-2">
-              <Coins className="w-4 h-4 text-yellow-600" />
-              <span>₵checkels</span>
-            </span>
-            <span className="font-bold text-yellow-600">{user?.coins || 0}</span>
+        <div className="space-y-3">
+          <p className="text-green-600">
+            Ready to grow your ₵ Checkels tree?
+          </p>
+          <div className="bg-white p-3 rounded border">
+            <p className="text-sm text-gray-600">Your Tree Status</p>
+            <p className="font-bold text-lg text-green-600">
+              Level {level}
+            </p>
           </div>
-          <div className="flex justify-between items-center">
-            <span className="flex items-center space-x-2">
-              <Wallet className="w-4 h-4 text-green-600" />
-              <span>Chips</span>
-            </span>
-            <span className="font-bold text-green-600">{user?.chips || 0}</span>
+          <Link to="/tree">
+            <Button className="w-full bg-green-600 hover:bg-green-700">
+              Visit Your Tree
+            </Button>
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+const QuickStatsCard = ({ user }: any) => {
+  return (
+    <Card className="bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-200 shadow-lg">
+      <CardHeader>
+        <CardTitle className="text-purple-700 flex items-center space-x-2">
+          <CheckelsIcon className="w-6 h-6" />
+          <span>Your Wealth</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="text-center p-3 bg-yellow-50 rounded border border-yellow-200">
+              <p className="text-xs text-gray-600">₵ Checkels</p>
+              <p className="font-bold text-lg text-yellow-600">
+                {(user?.coins || 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="text-center p-3 bg-green-50 rounded border border-green-200">
+              <p className="text-xs text-gray-600">Chips</p>
+              <p className="font-bold text-lg text-green-600">
+                {(user?.chips || 0).toFixed(2)}
+              </p>
+            </div>
           </div>
-          <div className="text-center pt-4">
-            <p className="text-sm text-gray-600">Welcome back, {user?.username}!</p>
+          <div className="flex space-x-2">
+            <Link to="/wallet" className="flex-1">
+              <Button variant="outline" size="sm" className="w-full">
+                Wallet
+              </Button>
+            </Link>
+            <Link to="/casino" className="flex-1">
+              <Button variant="outline" size="sm" className="w-full">
+                Casino
+              </Button>
+            </Link>
           </div>
         </div>
       </CardContent>
@@ -244,49 +354,32 @@ const QuickStats = ({ user }: any) => {
 
 const NavigationCard = () => {
   return (
-    <Card className="lg:col-span-2">
+    <Card className="bg-gradient-to-br from-blue-50 to-cyan-50 border-blue-200 shadow-lg">
       <CardHeader>
-        <CardTitle>Choose Your Adventure</CardTitle>
+        <CardTitle className="text-blue-700 flex items-center space-x-2">
+          <Home className="w-6 h-6" />
+          <span>Quick Access</span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-3">
           <Link to="/tree">
-            <Card className="hover:bg-green-50 transition-colors cursor-pointer">
-              <CardContent className="p-6 text-center">
-                <TreePine className="w-12 h-12 text-green-600 mx-auto mb-4" />
-                <h3 className="font-bold text-lg mb-2">Money Tree Farm</h3>
-                <p className="text-gray-600 text-sm">Grow your crypto coins passively</p>
-                <Button className="mt-4 w-full" variant="outline">
-                  Visit Tree
-                </Button>
-              </CardContent>
-            </Card>
+            <Button className="w-full bg-green-600 hover:bg-green-700 flex items-center space-x-2 mb-3">
+              <TreePine className="w-4 h-4" />
+              <span>Money Tree Farm</span>
+            </Button>
           </Link>
-
           <Link to="/casino">
-            <Card className="hover:bg-purple-50 transition-colors cursor-pointer">
-              <CardContent className="p-6 text-center">
-                <Gamepad2 className="w-12 h-12 text-purple-600 mx-auto mb-4" />
-                <h3 className="font-bold text-lg mb-2">Casino Games</h3>
-                <p className="text-gray-600 text-sm">Play games and win big</p>
-                <Button className="mt-4 w-full" variant="outline">
-                  Enter Casino
-                </Button>
-              </CardContent>
-            </Card>
+            <Button className="w-full bg-purple-600 hover:bg-purple-700 flex items-center space-x-2 mb-3">
+              <Gamepad2 className="w-4 h-4" />
+              <span>Crypto Casino</span>
+            </Button>
           </Link>
-
           <Link to="/wallet">
-            <Card className="hover:bg-blue-50 transition-colors cursor-pointer">
-              <CardContent className="p-6 text-center">
-                <Wallet className="w-12 h-12 text-blue-600 mx-auto mb-4" />
-                <h3 className="font-bold text-lg mb-2">Crypto Wallet</h3>
-                <p className="text-gray-600 text-sm">Manage your coins and chips</p>
-                <Button className="mt-4 w-full" variant="outline">
-                  Open Wallet
-                </Button>
-              </CardContent>
-            </Card>
+            <Button className="w-full bg-indigo-600 hover:bg-indigo-700 flex items-center space-x-2">
+              <Wallet className="w-4 h-4" />
+              <span>₵ Checkels Wallet</span>
+            </Button>
           </Link>
         </div>
       </CardContent>
@@ -294,157 +387,388 @@ const NavigationCard = () => {
   );
 };
 
-const AdminQuickAccess = () => {
-  const [showUserManager, setShowUserManager] = useState(false);
-  const [showReports, setShowReports] = useState(false);
+const AdminPanel = () => {
+  const [activeTab, setActiveTab] = useState("overview");
   const [users, setUsers] = useState<any>({});
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
+  const [pendingChanges, setPendingChanges] = useState(false);
 
   useEffect(() => {
-    const savedUsers = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
+    const savedUsers = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+    const savedCurrentUser = JSON.parse(localStorage.getItem("casinoUser") || "{}");
     setUsers(savedUsers);
-  }, [showUserManager, showReports]);
+    setCurrentUser(savedCurrentUser);
+  }, [activeTab]);
 
-  const handleAddCoins = (username: string, amount: number) => {
-    const updatedUsers = { ...users };
-    updatedUsers[username].coins += amount;
-
-    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
-    setUsers(updatedUsers);
-
-    // Update current user if it's the same user
-    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
-    if (currentUser.username === username) {
-      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
-    }
-
-    toast({
-      title: "Coins Added",
-      description: `Added ${amount} coins to ${username}`,
-    });
+  const calculateTreeLevel = (upgrades: any) => {
+    if (!upgrades) return 1;
+    return upgrades.treeLevel || 1;
   };
 
-  const handleResetUser = (username: string) => {
-    const updatedUsers = { ...users };
-    updatedUsers[username] = {
-      ...updatedUsers[username],
-      coins: 100,
-      chips: 0,
-      upgrades: {},
-      activeBoosters: [],
-      upgradeResetTime: null
+  const executeActionWithConfirmation = (action: () => void) => {
+    action();
+    setPendingChanges(true);
+  };
+
+  const handleSaveChanges = () => {
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+    
+    // Update current user if they were modified
+    const updatedCurrentUser = users[currentUser.username];
+    if (updatedCurrentUser) {
+      localStorage.setItem("casinoUser", JSON.stringify(updatedCurrentUser));
+    }
+    
+    toast({
+      title: "Changes Saved",
+      description: "Page will reload to apply changes...",
+    });
+    
+    // Force page reload after a short delay to show the toast
+    setTimeout(() => {
+      window.location.reload();
+    }, 1000);
+  };
+
+  const handleCancelChanges = () => {
+    setPendingChanges(false);
+    // Reload users from localStorage to reset any pending changes
+    const savedUsers = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+    setUsers(savedUsers);
+  };
+
+  const handleAddCoins = (username: string, amount: number) => {
+    const action = () => {
+      const updatedUsers = { ...users };
+      updatedUsers[username].coins = (updatedUsers[username].coins || 0) + amount;
+      setUsers(updatedUsers);
+
+      if (currentUser.username === username) {
+        const updatedCurrentUser = updatedUsers[username];
+        localStorage.setItem("casinoUser", JSON.stringify(updatedCurrentUser));
+        setCurrentUser(updatedCurrentUser);
+      }
+
+      toast({
+        title: "₵ Checkels Added",
+        description: `Added ${amount} ₵ Checkels to ${username}`,
+      });
     };
 
-    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
-    setUsers(updatedUsers);
+    executeActionWithConfirmation(action);
+  };
 
-    // Clear user transactions
-    localStorage.removeItem(`tree_transactions_${username}`);
-    localStorage.removeItem(`transactions_${username}`);
+  const handleAddChips = (username: string, amount: number) => {
+    const action = () => {
+      const updatedUsers = { ...users };
+      updatedUsers[username].chips = (updatedUsers[username].chips || 0) + amount;
+      setUsers(updatedUsers);
 
-    // Update current user if it's the same user
-    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
-    if (currentUser.username === username) {
-      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
-    }
+      if (currentUser.username === username) {
+        const updatedCurrentUser = updatedUsers[username];
+        localStorage.setItem("casinoUser", JSON.stringify(updatedCurrentUser));
+        setCurrentUser(updatedCurrentUser);
+      }
 
-    toast({
-      title: "User Reset",
-      description: `${username} has been reset to default state`,
-    });
+      toast({
+        title: "Chips Added",
+        description: `Added ${amount} chips to ${username}`,
+      });
+    };
+
+    executeActionWithConfirmation(action);
+  };
+
+  const handleBanUser = (username: string) => {
+    const action = () => {
+      const updatedUsers = { ...users };
+      updatedUsers[username] = {
+        ...updatedUsers[username],
+        banned: true,
+        bannedAt: Date.now()
+      };
+      setUsers(updatedUsers);
+
+      toast({
+        title: "User Banned",
+        description: `${username} has been banned from the casino`,
+        variant: "destructive",
+      });
+    };
+    executeActionWithConfirmation(action);
+  };
+
+  const handleUnbanUser = (username: string) => {
+    const action = () => {
+      const updatedUsers = { ...users };
+      updatedUsers[username] = {
+        ...updatedUsers[username],
+        banned: false
+      };
+      delete updatedUsers[username].bannedAt;
+      setUsers(updatedUsers);
+
+      toast({
+        title: "User Unbanned",
+        description: `${username} has been unbanned`,
+      });
+    };
+    executeActionWithConfirmation(action);
   };
 
   const handleDeleteUser = (username: string) => {
-    if (username === 'admin') {
+    const action = () => {
+      if (users[username]?.isAdmin) {
+        toast({
+          title: "Cannot Delete Admin",
+          description: "Admin accounts cannot be deleted",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Are you sure you want to permanently delete user "${username}"?\n\nThis action cannot be undone and will:\n• Remove all user data\n• Clear transaction history\n• Delete tree progress\n• Remove wallet data`
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      // Remove user from users object
+      const updatedUsers = { ...users };
+      delete updatedUsers[username];
+      setUsers(updatedUsers);
+
+      // Remove all user-specific data from localStorage
+      localStorage.removeItem(`tree_transactions_${username}`);
+      localStorage.removeItem(`transactions_${username}`);
+      localStorage.removeItem(`tree_generation_${username}`);
+      localStorage.removeItem(`casino_transactions_${username}`);
+      localStorage.removeItem(`user_boosters_${username}`);
+      localStorage.removeItem(`user_settings_${username}`);
+
       toast({
-        title: "Cannot Delete",
-        description: "Cannot delete admin account",
-        variant: "destructive",
+        title: "User Deleted",
+        description: `${username} has been permanently deleted from the database`,
       });
-      return;
-    }
+    };
+    executeActionWithConfirmation(action);
+  };
 
+  const handleResetAdminAccount = () => {
+    const adminUsername = currentUser.username;
     const updatedUsers = { ...users };
-    delete updatedUsers[username];
 
-    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+    updatedUsers[adminUsername] = {
+      ...updatedUsers[adminUsername],
+      coins: 0,
+      chips: 0,
+      upgrades: { treeLevel: 1 },
+      activeBoosters: [],
+      lastLogin: Date.now(),
+    };
+
+    localStorage.setItem("casinoUsers", JSON.stringify(updatedUsers));
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUsers[adminUsername]));
+
+    // Clear admin's transaction histories
+    localStorage.removeItem(`tree_transactions_${adminUsername}`);
+    localStorage.removeItem(`transactions_${adminUsername}`);
+    localStorage.removeItem(`tree_generation_${adminUsername}`);
+
     setUsers(updatedUsers);
-
-    // Clear user transactions
-    localStorage.removeItem(`tree_transactions_${username}`);
-    localStorage.removeItem(`transactions_${username}`);
+    setCurrentUser(updatedUsers[adminUsername]);
 
     toast({
-      title: "User Deleted",
-      description: `${username} has been deleted`,
+      title: "Admin Account Reset",
+      description: "Your admin account has been reset for testing",
     });
+
+    // Reload the page to reflect changes
+    setTimeout(() => window.location.reload(), 1000);
   };
 
   const getTotalStats = () => {
     const userList = Object.values(users);
+    const nonAdminUsers = userList.filter((user: any) => !user.isAdmin);
     return {
-      totalUsers: userList.length,
-      totalCoins: userList.reduce((sum: number, user: any) => sum + (user.coins || 0), 0),
-      totalChips: userList.reduce((sum: number, user: any) => sum + (user.chips || 0), 0),
-      activeUsers: userList.filter((user: any) => 
+      totalUsers: nonAdminUsers.length,
+      totalCoins: nonAdminUsers.reduce((sum: number, user: any) => sum + (user.coins || 0), 0),
+      totalChips: nonAdminUsers.reduce((sum: number, user: any) => sum + (user.chips || 0), 0),
+      activeUsers: nonAdminUsers.filter((user: any) =>
         user.lastLogin && Date.now() - user.lastLogin < 24 * 60 * 60 * 1000
-      ).length
+      ).length,
+      bannedUsers: nonAdminUsers.filter((user: any) => user.banned).length
     };
   };
 
-  if (showUserManager) {
+  const stats = getTotalStats();
+
+  if (activeTab === "overview") {
     return (
-      <Card className="border-red-200 bg-red-50 lg:col-span-3">
+      <Card className="border-red-200 bg-gradient-to-br from-red-50 to-orange-50 lg:col-span-3">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between text-red-600">
+          <CardTitle className="flex items-center justify-between text-red-700">
             <span className="flex items-center space-x-2">
               <Settings className="w-6 h-6" />
-              <span>User Management</span>
+              <span>🎰 Casino Admin Panel</span>
             </span>
-            <Button variant="outline" size="sm" onClick={() => setShowUserManager(false)}>
-              Close
+            <div className="flex space-x-2">
+              <Button size="sm" variant="outline" onClick={() => setActiveTab("users")}>
+                User Management
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setActiveTab("testing")}>
+                Testing Tools
+              </Button>
+            </div>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            <div className="text-center p-4 bg-white rounded-lg border shadow-sm">
+              <h3 className="font-bold text-2xl text-blue-600">{stats.totalUsers}</h3>
+              <p className="text-sm text-gray-600">Total Players</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded-lg border shadow-sm">
+              <h3 className="font-bold text-2xl text-green-600">{stats.totalCoins.toFixed(0)}</h3>
+              <p className="text-sm text-gray-600">Total ₵ Checkels</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded-lg border shadow-sm">
+              <h3 className="font-bold text-2xl text-purple-600">{stats.totalChips.toFixed(0)}</h3>
+              <p className="text-sm text-gray-600">Total Chips</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded-lg border shadow-sm">
+              <h3 className="font-bold text-2xl text-orange-600">{stats.activeUsers}</h3>
+              <p className="text-sm text-gray-600">Active (24h)</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded-lg border shadow-sm">
+              <h3 className="font-bold text-2xl text-red-600">{stats.bannedUsers}</h3>
+              <p className="text-sm text-gray-600">Banned Users</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white p-4 rounded-lg border shadow-sm">
+              <h3 className="font-bold mb-3 text-gray-700">🏆 Top Players by ₵ Checkels</h3>
+              <div className="space-y-2">
+                {Object.entries(users)
+                  .filter(([, userData]: [string, any]) => !userData.isAdmin)
+                  .sort(([, a]: [string, any], [, b]: [string, any]) => (b.coins || 0) - (a.coins || 0))
+                  .slice(0, 5)
+                  .map(([username, userData]: [string, any], index) => (
+                    <div key={username} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
+                      <span className="flex items-center space-x-2">
+                        <span className="font-bold">#{index + 1}</span>
+                        <span>{username}</span>
+                        {userData.isAdmin && <span className="text-red-500 text-xs">(Admin)</span>}
+                        {userData.banned && <span className="text-red-600 text-xs">🚫</span>}
+                      </span>
+                      <span className="font-medium text-green-600">{(userData.coins || 0).toFixed(2)} ₵</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg border shadow-sm">
+              <h3 className="font-bold mb-3 text-gray-700">💰 Top Players by Chips</h3>
+              <div className="space-y-2">
+                {Object.entries(users)
+                  .filter(([, userData]: [string, any]) => !userData.isAdmin)
+                  .sort(([, a]: [string, any], [, b]: [string, any]) => (b.chips || 0) - (a.chips || 0))
+                  .slice(0, 5)
+                  .map(([username, userData]: [string, any], index) => (
+                    <div key={username} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
+                      <span className="flex items-center space-x-2">
+                        <span className="font-bold">#{index + 1}</span>
+                        <span>{username}</span>
+                        {userData.isAdmin && <span className="text-red-500 text-xs">(Admin)</span>}
+                        {userData.banned && <span className="text-red-600 text-xs">🚫</span>}
+                      </span>
+                      <span className="font-medium text-purple-600">{(userData.chips || 0).toFixed(2)} chips</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "users") {
+    return (
+      <Card className="border-red-200 bg-gradient-to-br from-red-50 to-orange-50 lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between text-red-700">
+            <span className="flex items-center space-x-2">
+              <Settings className="w-6 h-6" />
+              <span>👥 User Management</span>
+            </span>
+            <Button size="sm" variant="outline" onClick={() => setActiveTab("overview")}>
+              Back to Overview
             </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4 max-h-96 overflow-y-auto">
             {Object.entries(users).map(([username, userData]: [string, any]) => (
-              <div key={username} className="p-4 bg-white rounded border">
+              <div key={username} className={`p-4 bg-white rounded-lg border shadow-sm ${userData.banned ? 'border-red-300 bg-red-50' : ''}`}>
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
-                    <h3 className="font-bold text-lg">
-                      {username} {userData.isAdmin && <span className="text-red-500 text-sm">(Admin)</span>}
+                    <h3 className="font-bold text-lg flex items-center space-x-2">
+                      <span>{username}</span>
+                      {userData.isAdmin && <span className="text-red-500 text-sm bg-red-100 px-2 py-1 rounded">(Admin)</span>}
+                      {userData.banned && <span className="text-red-600 text-sm bg-red-200 px-2 py-1 rounded">🚫 BANNED</span>}
                     </h3>
                     <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
-                      <div>Coins: <span className="font-medium text-green-600">{userData.coins || 0}</span></div>
-                      <div>Chips: <span className="font-medium text-blue-600">{userData.chips || 0}</span></div>
-                      <div>Level: <span className="font-medium">{calculateTreeLevel(userData.upgrades)}</span></div>
-                      <div>Last Login: <span className="font-medium">
-                        {userData.lastLogin ? new Date(userData.lastLogin).toLocaleDateString() : 'Never'}
+                      <div>₵ Checkels: <span className="font-medium text-green-600">{(userData.coins || 0).toFixed(2)}</span></div>
+                      <div>Chips: <span className="font-medium text-purple-600">{(userData.chips || 0).toFixed(2)}</span></div>
+                      <div>Tree Level: <span className="font-medium text-blue-600">{calculateTreeLevel(userData.upgrades)}</span></div>
+                      <div>Status: <span className={`font-medium ${userData.banned ? 'text-red-600' : 'text-green-600'}`}>
+                        {userData.banned ? 'Banned' : 'Active'}
                       </span></div>
                     </div>
-                    <div className="mt-2">
-                      <p className="text-xs text-gray-600">
-                        Upgrades: {Object.values(userData.upgrades || {}).filter(Boolean).length}/3
-                      </p>
-                      <p className="text-xs text-gray-600">
-                        Active Boosters: {(userData.activeBoosters || []).filter((b: any) => Date.now() < b.endTime).length}
-                      </p>
+                    <div className="mt-2 text-xs text-gray-600">
+                      <div>Last Login: {userData.lastLogin ? new Date(userData.lastLogin).toLocaleString() : 'Never'}</div>
+                      {userData.bannedAt && <div className="text-red-600">Banned: {new Date(userData.bannedAt).toLocaleString()}</div>}
                     </div>
                   </div>
                   <div className="flex flex-col space-y-2 ml-4">
-                    <Button size="sm" variant="outline" onClick={() => handleAddCoins(username, 1000)}>
-                      +1000 Coins
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleAddCoins(username, 10000)}>
-                      +10000 Coins
-                    </Button>
-                    <Button size="sm" variant="destructive" onClick={() => handleResetUser(username)}>
-                      Reset User
-                    </Button>
+                    <div className="flex space-x-2">
+                      <Button size="sm" variant="outline" onClick={() => handleAddCoins(username, 1000)}>
+                        +1000 ₵
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleAddChips(username, 1000)}>
+                        +1000 💰
+                      </Button>
+                    </div>
+                    {!userData.banned ? (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={userData.isAdmin}
+                        onClick={() => handleBanUser(username)}
+                      >
+                        🚫 Ban User
+                      </Button>
+                    ) : (
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => handleUnbanUser(username)}
+                      >
+                        ✅ Unban User
+                      </Button>
+                    )}
                     {!userData.isAdmin && (
-                      <Button size="sm" variant="destructive" onClick={() => handleDeleteUser(username)}>
-                        Delete User
+                      <Button 
+                        size="sm" 
+                        variant="destructive"
+                        onClick={() => handleDeleteUser(username)}
+                      >
+                        🗑️ Delete User
                       </Button>
                     )}
                   </div>
@@ -452,119 +776,131 @@ const AdminQuickAccess = () => {
               </div>
             ))}
           </div>
+          
+          {pendingChanges && (
+            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-yellow-800">Unsaved Changes</h3>
+                  <p className="text-sm text-yellow-700">You have made changes that need to be saved. The page will reload to apply changes.</p>
+                </div>
+                <div className="flex space-x-2">
+                  <Button variant="outline" size="sm" onClick={handleCancelChanges}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleSaveChanges} className="bg-green-600 hover:bg-green-700">
+                    Save Changes
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
   }
 
-  if (showReports) {
-    const stats = getTotalStats();
+  if (activeTab === "testing") {
     return (
-      <Card className="border-red-200 bg-red-50 lg:col-span-3">
+      <Card className="border-red-200 bg-gradient-to-br from-red-50 to-orange-50 lg:col-span-3">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between text-red-600">
+          <CardTitle className="flex items-center justify-between text-red-700">
             <span className="flex items-center space-x-2">
               <Settings className="w-6 h-6" />
-              <span>System Reports</span>
+              <span>🧪 Testing Tools</span>
             </span>
-            <Button variant="outline" size="sm" onClick={() => setShowReports(false)}>
-              Close
+            <Button size="sm" variant="outline" onClick={() => setActiveTab("overview")}>
+              Back to Overview
             </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div className="text-center p-4 bg-white rounded border">
-              <h3 className="font-bold text-2xl text-blue-600">{stats.totalUsers}</h3>
-              <p className="text-sm text-gray-600">Total Users</p>
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-lg border shadow-sm">
+              <h3 className="font-bold text-lg mb-4 text-gray-700">🔄 Admin Account Reset</h3>
+              <p className="text-gray-600 mb-4">
+                Reset your admin account to test the tree farm from the beginning. This will:
+              </p>
+              <ul className="text-sm text-gray-600 mb-4 space-y-1 ml-4">
+                <li>• Reset ₵ Checkels to 0</li>
+                <li>• Reset Chips to 0</li>
+                <li>• Reset Tree Level to 1</li>
+                <li>• Clear all active boosters</li>
+                <li>• Clear all transaction history</li>
+              </ul>
+              <Button
+                variant="destructive"
+                onClick={handleResetAdminAccount}
+                className="bg-orange-600 hover:bg-orange-700"
+              >
+                🔄 Reset My Admin Account for Testing
+              </Button>
             </div>
-            <div className="text-center p-4 bg-white rounded border">
-              <h3 className="font-bold text-2xl text-green-600">{stats.totalCoins.toFixed(0)}</h3>
-              <p className="text-sm text-gray-600">Total Coins</p>
-            </div>
-            <div className="text-center p-4 bg-white rounded border">
-              <h3 className="font-bold text-2xl text-purple-600">{stats.totalChips.toFixed(0)}</h3>
-              <p className="text-sm text-gray-600">Total Chips</p>
-            </div>
-            <div className="text-center p-4 bg-white rounded border">
-              <h3 className="font-bold text-2xl text-orange-600">{stats.activeUsers}</h3>
-              <p className="text-sm text-gray-600">Active Users (24h)</p>
-            </div>
-          </div>
 
-          <div className="space-y-4">
-            <div className="bg-white p-4 rounded border">
-              <h3 className="font-bold mb-3">Top Users by Coins</h3>
-              <div className="space-y-2">
-                {Object.entries(users)
-                  .sort(([,a]: [string, any], [,b]: [string, any]) => (b.coins || 0) - (a.coins || 0))
-                  .slice(0, 5)
-                  .map(([username, userData]: [string, any], index) => (
-                    <div key={username} className="flex justify-between items-center text-sm">
-                      <span>#{index + 1} {username}</span>
-                      <span className="font-medium text-green-600">{userData.coins || 0} coins</span>
-                    </div>
-                  ))}
+            <div className="bg-white p-6 rounded-lg border shadow-sm">
+              <h3 className="font-bold text-lg mb-4 text-gray-700">🎮 Quick Actions</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  variant="outline"
+                  onClick={() => handleAddCoins(currentUser.username, 10000)}
+                  className="bg-green-50 hover:bg-green-100 border-green-200"
+                >
+                  Give Myself 10,000 ₵ Checkels
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleAddChips(currentUser.username, 10000)}
+                  className="bg-purple-50 hover:bg-purple-100 border-purple-200"
+                >
+                  Give Myself 10,000 Chips
+                </Button>
               </div>
             </div>
 
-            <div className="bg-white p-4 rounded border">
-              <h3 className="font-bold mb-3">User Activity Summary</h3>
-              <div className="space-y-2 text-sm">
-                {Object.entries(users).map(([username, userData]: [string, any]) => (
-                  <div key={username} className="flex justify-between items-center">
-                    <span>{username}</span>
-                    <div className="text-right">
-                      <div>Level {calculateTreeLevel(userData.upgrades)}</div>
-                      <div className="text-xs text-gray-500">
-                        {userData.lastLogin ? 
-                          `Active ${Math.floor((Date.now() - userData.lastLogin) / (1000 * 60 * 60 * 24))}d ago` : 
-                          'Never logged in'
-                        }
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded border">
-              <h3 className="font-bold mb-3">Economy Controls</h3>
-              <div className="grid grid-cols-2 gap-2">
-                <Button 
-                  variant="outline" 
+            <div className="bg-white p-6 rounded-lg border shadow-sm">
+              <h3 className="font-bold text-lg mb-4 text-gray-700">⚠️ Danger Zone</h3>
+              <div className="space-y-3">
+                <Button
+                  variant="destructive"
                   onClick={() => {
-                    // Clear all transactions
                     Object.keys(users).forEach(username => {
-                      localStorage.removeItem(`tree_transactions_${username}`);
-                      localStorage.removeItem(`transactions_${username}`);
+                      if (!users[username].isAdmin) {
+                        localStorage.removeItem(`tree_transactions_${username}`);
+                        localStorage.removeItem(`transactions_${username}`);
+                        localStorage.removeItem(`tree_generation_${username}`);
+                      }
                     });
                     toast({
-                      title: "Economy Reset",
-                      description: "All transaction histories cleared",
+                      title: "System Reset",
+                      description: "All non-admin transaction histories cleared",
                     });
                   }}
+                  className="w-full"
                 >
-                  Clear All Transactions
+                  🗑️ Clear All User Transactions
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="destructive"
                   onClick={() => {
-                    // Reset all user boosters
                     const updatedUsers = { ...users };
                     Object.keys(updatedUsers).forEach(username => {
-                      updatedUsers[username].activeBoosters = [];
-                      updatedUsers[username].upgradeResetTime = null;
+                      if (!updatedUsers[username].isAdmin) {
+                        updatedUsers[username].activeBoosters = [];
+                        updatedUsers[username].coins = 0;
+                        updatedUsers[username].chips = 0;
+                        updatedUsers[username].upgrades = { treeLevel: 1 };
+                      }
                     });
                     localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
                     setUsers(updatedUsers);
                     toast({
-                      title: "Boosters Reset",
-                      description: "All active boosters cleared",
+                      title: "Economy Reset",
+                      description: "All non-admin accounts reset",
                     });
                   }}
+                  className="w-full"
                 >
-                  Clear All Boosters
+                  💥 Reset All User Accounts
                 </Button>
               </div>
             </div>
@@ -575,25 +911,25 @@ const AdminQuickAccess = () => {
   }
 
   return (
-    <Card className="border-red-200 bg-red-50">
+    <Card className="border-red-200 bg-gradient-to-br from-red-50 to-orange-50">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2 text-red-600">
+        <CardTitle className="flex items-center space-x-2 text-red-700">
           <Settings className="w-6 h-6" />
-          <span>Admin Access</span>
+          <span>🎰 Casino Admin</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Button variant="outline" className="w-full" onClick={() => setShowUserManager(true)}>
-            Manage Users
-          </Button>
-          <Button variant="outline" className="w-full" onClick={() => setShowReports(true)}>
-            View Reports
+          <Button variant="outline" className="w-full" onClick={() => setActiveTab("overview")}>
+            <Settings className="w-4 h-4 mr-2" />
+            Open Admin Panel
           </Button>
         </div>
       </CardContent>
     </Card>
   );
 };
+
+
 
 export default Index;

@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   TreePine,
-  Coins,
   Home,
   Gamepad2,
   Wallet,
@@ -12,6 +11,7 @@ import {
   History,
   TrendingUp,
 } from "lucide-react";
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
 
@@ -49,7 +49,7 @@ const getTreeImage = (level: number) => {
 const formatDuration = (seconds: number) => {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  
+
   if (hours > 0) {
     return `${hours}h ${minutes}m`;
   } else {
@@ -74,7 +74,7 @@ const TreePage = () => {
         };
       }
 
-      // Calculate offline earnings
+      // Calculate offline earnings (notification only, not auto-added to balance)
       const lastVisit = userData.treeLastVisit || Date.now();
       const level = calculateTreeLevel(userData.upgrades);
       const maxGenerationTime = calculateMaxGenerationTime(level);
@@ -88,37 +88,48 @@ const TreePage = () => {
         const offlineCoins = (offlineTime / 1000) * baseCPS;
 
         if (offlineCoins > 0.001) {
-          userData.coins += offlineCoins;
+            // Add offline earnings to the current generation state
+            const savedGenerationState = localStorage.getItem(`tree_generation_${userData.username}`);
+            let generationState = savedGenerationState ? JSON.parse(savedGenerationState) : {
+              currentCheckels: 0,
+              lastClaimTime: Date.now(),
+              generationActive: true
+            };
 
-          const transaction = {
-            type: "offline",
-            amount: offlineCoins,
-            timestamp: Date.now(),
-            description: `Offline earnings (${Math.floor(offlineTime / 60000)} minutes)`,
-          };
+            // Add offline earnings to current checkels
+            generationState.currentCheckels = (generationState.currentCheckels || 0) + offlineCoins;
+            
+            // Save updated generation state
+            localStorage.setItem(`tree_generation_${userData.username}`, JSON.stringify(generationState));
 
-          const transactions = JSON.parse(
-            localStorage.getItem(`tree_transactions_${userData.username}`) ||
-              "[]",
-          );
-          transactions.unshift(transaction);
-          localStorage.setItem(
-            `tree_transactions_${userData.username}`,
-            JSON.stringify(transactions.slice(0, 50)),
-          );
+            const offlineMinutes = Math.floor(offlineTime / 60000);
+            const maxMinutes = Math.floor(maxGenerationTime / 60);
 
-          localStorage.setItem("casinoUser", JSON.stringify(userData));
-          const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
-          users[userData.username] = userData;
-          localStorage.setItem("casinoUsers", JSON.stringify(users));
+            // Add offline earnings transaction
+            const offlineTransaction = {
+              type: "offline_generation",
+              amount: offlineCoins,
+              timestamp: Date.now(),
+              description: `Offline generation (${offlineMinutes}/${maxMinutes} minutes)`,
+            };
 
-          setTimeout(() => {
-            toast({
-              title: "Welcome back!",
-              description: `You earned ${offlineCoins.toFixed(3)} ₵ while offline!`,
-            });
-          }, 500);
-        }
+            const transactions = JSON.parse(
+              localStorage.getItem(`tree_transactions_${userData.username}`) || "[]",
+            );
+            transactions.unshift(offlineTransaction);
+            localStorage.setItem(
+              `tree_transactions_${userData.username}`,
+              JSON.stringify(transactions.slice(0, 50)),
+            );
+
+            setTimeout(() => {
+              toast({
+                title: "Welcome back!",
+                description: `${offlineCoins.toFixed(3)} ₵ Checkels generated while offline (${offlineMinutes}/${maxMinutes} minutes) and added to your current checkels!`,
+              });
+            }, 500);
+          }
+
       }
 
       userData.treeLastVisit = Date.now();
@@ -150,48 +161,65 @@ const TreePage = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">
-      <header className="bg-black/20 backdrop-blur-sm p-4">
+      <header className="bg-gradient-to-r from-green-800/90 to-blue-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
+          <h1 className="text-3xl font-bold text-white flex items-center space-x-3">
             <TreePine className="w-8 h-8 text-green-400" />
-            <span>Money Tree Farm</span>
+            <span className="bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+              Money Tree Farm
+            </span>
           </h1>
-          <div className="flex items-center space-x-6 text-white">
-            <div className="flex items-center space-x-2">
-              <Coins className="w-5 h-5 text-yellow-400" />
-              <span>{user?.coins?.toFixed(2) || "0.00"} ₵ Checkels</span>
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
+              <div className="flex items-center space-x-2">
+                <CheckelsIcon className="w-5 h-5 text-yellow-400" />
+                <span className="text-yellow-100 font-semibold">
+                  {(user?.coins || 0).toFixed(2)} ₵ Checkels
+                </span>
+              </div>
+              <div className="w-px h-6 bg-white/20"></div>
+              <div className="flex items-center space-x-2">
+                <ChipsIcon className="w-5 h-5 text-green-400" />
+                <span className="text-green-100 font-semibold">
+                  {(user?.chips || 0).toFixed(2)} Chips
+                </span>
+              </div>
             </div>
-            <span className="text-white">Welcome, {user?.username}</span>
-            <Link to="/">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center space-x-2"
-              >
-                <Home className="w-4 h-4" />
-                <span>Home</span>
-              </Button>
-            </Link>
-            <Link to="/casino">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center space-x-2"
-              >
-                <Gamepad2 className="w-4 h-4" />
-                <span>Casino</span>
-              </Button>
-            </Link>
-            <Link to="/wallet">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center space-x-2"
-              >
-                <Wallet className="w-4 h-4" />
-                <span>Wallet</span>
-              </Button>
-            </Link>
+            <div className="flex items-center space-x-3">
+              <span className="text-white/90 font-medium">Welcome, {user?.username}</span>
+              <div className="flex space-x-2">
+                <Link to="/">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30"
+                  >
+                    <Home className="w-4 h-4" />
+                    <span>Home</span>
+                  </Button>
+                </Link>
+                <Link to="/casino">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30"
+                  >
+                    <Gamepad2 className="w-4 h-4" />
+                    <span>Casino</span>
+                  </Button>
+                </Link>
+                <Link to="/wallet">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-indigo-500/20 border-indigo-400/30 text-indigo-100 hover:bg-indigo-500/30"
+                  >
+                    <Wallet className="w-4 h-4" />
+                    <span>Wallet</span>
+                  </Button>
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -451,7 +479,7 @@ const MoneyTreeCard = ({ user, setUser }: any) => {
                   const timeLeft = Math.max(0, (booster.endTime - Date.now()) / 1000 / 60);
                   const totalDuration = 30; // Assuming original duration, adjust based on booster type
                   const progressPercentage = Math.max(0, (timeLeft / totalDuration) * 100);
-                  
+
                   return (
                     <div
                       key={index}
@@ -626,7 +654,7 @@ const TreeLevelingCard = ({ user, setUser }: any) => {
           >
             {canUpgrade ? (
               <span className="flex items-center space-x-2">
-                <Coins className="w-4 h-4" />
+                <CheckelsIcon className="w-4 h-4" />
                 <span>Upgrade to Level {nextLevel} ({upgradeCost} ₵ Checkels)</span>
               </span>
             ) : (
@@ -788,7 +816,7 @@ const BoosterStore = ({ user, setUser }: any) => {
                       <span className="text-xs">Active</span>
                     ) : (
                       <span className="flex items-center space-x-1">
-                        <Coins className="w-3 h-3" />
+                        <CheckelsIcon className="w-3 h-3" />
                         <span>{booster.cost}</span>
                       </span>
                     )}
