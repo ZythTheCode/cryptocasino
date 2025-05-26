@@ -1,18 +1,17 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Gamepad2, Wallet, TreePine, Home, Settings } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-
-import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
-import ColorGame from "@/components/games/ColorGame";
+import { Gamepad2, DollarSign, Coins, Home, TreePine, Wallet, Settings } from "lucide-react";
+import { Link } from "react-router-dom";
 import SlotMachine from "@/components/games/SlotMachine";
 import Blackjack from "@/components/games/Blackjack";
 import Baccarat from "@/components/games/Baccarat";
+import ColorGame from "@/components/games/ColorGame";
 import Minebomb from "@/components/games/Minebomb";
-import TransactionHistory from "@/components/TransactionHistory";
-import { updateUserBalance, addTransaction as addDbTransaction } from "@/lib/database";
+import { updateUserBalance, addTransaction, signIn } from "@/lib/database";
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 
 const CasinoPage = () => {
   const [user, setUser] = useState<any>(null);
@@ -20,12 +19,28 @@ const CasinoPage = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    } else {
-      window.location.href = '/';
-    }
+    const loadUserData = async () => {
+      const savedUser = localStorage.getItem('casinoUser');
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        setUser(parsedUser);
+
+        // Try to sync with Supabase to get latest data
+        try {
+          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setUser(freshUser);
+        } catch (error) {
+          console.log('Using localStorage data, Supabase sync failed');
+          // Continue with localStorage data
+        }
+      } else {
+        // Redirect to home if no user data
+        window.location.href = '/';
+      }
+    };
+
+    loadUserData();
   }, []);
 
   const updateUser = async (updatedUser: any) => {
@@ -51,7 +66,7 @@ const CasinoPage = () => {
 
   const addTransaction = async (transaction: any) => {
     try {
-      await addDbTransaction({
+      await addTransaction({
         user_id: user.id,
         type: transaction.type,
         game: transaction.game,
@@ -77,6 +92,37 @@ const CasinoPage = () => {
       </div>
     );
   }
+
+  const updateUserChips = async (newChips: number, transaction?: any) => {
+    try {
+      // Update user balance in Supabase
+      const updatedUser = await updateUserBalance(user.id, {
+        chips: newChips
+      });
+
+      // Add transaction record if provided
+      if (transaction) {
+        await addTransaction({
+          user_id: user.id,
+          type: transaction.type === 'win' ? 'win' : 'bet',
+          game: transaction.game,
+          amount: transaction.amount,
+          description: transaction.description
+        });
+      }
+
+      // Update localStorage for session
+      localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+      setUser(updatedUser);
+    } catch (error) {
+      console.error('Error updating user chips:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update chips. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">

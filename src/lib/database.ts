@@ -28,9 +28,16 @@ export async function signIn(username: string, password: string) {
     .select('*')
     .eq('username', username)
     .eq('password_hash', password) // In production, verify hashed password
-    .single()
+    .single() // This ensures we get a single object, not an array
 
-  if (error) throw error
+  if (error) {
+    if (error.code === 'PGRST116') {
+      // No rows returned - user doesn't exist or wrong password
+      throw new Error('Invalid username or password')
+    }
+    throw error
+  }
+
   return data
 }
 
@@ -52,6 +59,18 @@ export async function getAllUsers() {
     .from('users')
     .select('*')
     .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data
+}
+
+export async function makeUserAdmin(userId: string) {
+  const { data, error } = await supabase
+    .from('users')
+    .update({ is_admin: true })
+    .eq('id', userId)
+    .select()
+    .single()
 
   if (error) throw error
   return data
@@ -131,15 +150,30 @@ export async function getAllTransactions(limit = 100) {
 }
 
 // Top-up functions
-export async function createTopupRequest(request: Omit<TopupRequest, 'id' | 'created_at' | 'status'>) {
-  const { data, error } = await supabase
-    .from('topup_requests')
-    .insert([request])
-    .select()
-    .single()
+export async function createTopupRequest(request: any) {
+  try {
+    const { data, error } = await supabase
+      .from('topup_requests')
+      .insert([{
+        user_id: request.user_id,
+        username: request.username,
+        amount: request.amount,
+        payment_method: request.payment_method,
+        reference_number: request.reference_number,
+        notes: request.notes,
+        receipt_name: request.receipt_name,
+        receipt_data: request.receipt_data,
+        status: request.status || 'pending'
+      }])
+      .select()
+      .single()
 
-  if (error) throw error
-  return data
+    if (error) throw error
+    return data
+  } catch (error) {
+    console.error('Error creating topup request:', error)
+    return false
+  }
 }
 
 export async function getPendingTopupRequests() {

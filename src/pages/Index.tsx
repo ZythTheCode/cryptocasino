@@ -5,11 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Gamepad2, Wallet, TreePine, Settings } from "lucide-react";
+import { Gamepad2, Wallet, TreePine, Settings, Home } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { signIn, signUp } from "@/lib/database";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const Index = () => {
@@ -19,6 +19,7 @@ const Index = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const savedUsers = localStorage.getItem("casinoUsers");
@@ -28,11 +29,28 @@ const Index = () => {
 
     const savedUser = localStorage.getItem("casinoUser");
     if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setCurrentUser(parsedUser);
+      
+      // Sync with Supabase to get latest data
+      syncUserWithSupabase(parsedUser);
     }
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const syncUserWithSupabase = async (localUser: any) => {
+    try {
+      // Get fresh user data from Supabase
+      const freshUser = await signIn(localUser.username, localUser.password_hash || 'migrated_user');
+      
+      // Update localStorage with fresh data
+      localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+      setCurrentUser(freshUser);
+    } catch (error) {
+      console.log('Could not sync with Supabase, using localStorage data');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!username || !password) {
@@ -44,94 +62,52 @@ const Index = () => {
       return;
     }
 
-    if (isLogin) {
-      // Login logic
-      const user = users[username];
-      if (!user) {
+    try {
+      if (isLogin) {
+        // Use Supabase signIn function
+        const user = await signIn(username, password);
+
+        // Store current user in localStorage for session management
+        localStorage.setItem('casinoUser', JSON.stringify(user));
+        setCurrentUser(user);
+
         toast({
-          title: "Login Failed",
-          description: "Invalid username or password",
-          variant: "destructive",
+          title: "Login Successful",
+          description: `Welcome back, ${username}!`,
         });
-        return;
+
+        // Navigate to trigger React Router re-render
+        setTimeout(() => {
+          navigate('/', { replace: true });
+        }, 500);
+      } else {
+        // Use Supabase signUp function
+        const newUser = await signUp(username, password);
+
+        // Store user in localStorage for session management
+        localStorage.setItem('casinoUser', JSON.stringify(newUser));
+        setCurrentUser(newUser);
+
+        toast({
+          title: "Registration Successful",
+          description: `Welcome, ${username}!`,
+        });
+
+        // Navigate to trigger React Router re-render
+        setTimeout(() => {
+          navigate('/', { replace: true });
+        }, 500);
       }
 
-      // Check password first
-      if (user.password !== password) {
-        toast({
-          title: "Login Failed",
-          description: "Invalid username or password",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Then check if user is banned BEFORE allowing login
-      if (user.banned === true) {
-        const bannedDate = user.bannedAt ? new Date(user.bannedAt).toLocaleDateString() : "Unknown";
-        toast({
-          title: "Account Banned",
-          description: `Your account has been banned from the casino. Banned on: ${bannedDate}. Please contact support.`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Only proceed with login if user is not banned
-      // Update last login
-      const updatedUser = {
-        ...user,
-        lastLogin: Date.now(),
-      };
-
-      const updatedUsers = { ...users, [username]: updatedUser };
-      setUsers(updatedUsers);
-      localStorage.setItem("casinoUsers", JSON.stringify(updatedUsers));
-      localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
-      setCurrentUser(updatedUser);
-
+      setUsername("");
+      setPassword("");
+    } catch (error: any) {
       toast({
-        title: "Login Successful",
-        description: `Welcome back, ${username}!`,
-      });
-    } else {
-      // Register logic
-      if (users[username]) {
-        toast({
-          title: "Registration Failed",
-          description: "Username already exists",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const newUser = {
-        username,
-        password,
-        coins: 0,
-        chips: 0,
-        upgrades: {
-          treeLevel: 1,
-        },
-        activeBoosters: [],
-        lastLogin: Date.now(),
-        isAdmin: username === "admin",
-      };
-
-      const updatedUsers = { ...users, [username]: newUser };
-      setUsers(updatedUsers);
-      localStorage.setItem("casinoUsers", JSON.stringify(updatedUsers));
-      localStorage.setItem("casinoUser", JSON.stringify(newUser));
-      setCurrentUser(newUser);
-
-      toast({
-        title: "Registration Successful",
-        description: `Welcome, ${username}!`,
+        title: isLogin ? "Login Failed" : "Registration Failed", 
+        description: error.message || (isLogin ? "Invalid username or password" : "Failed to create account"),
+        variant: "destructive",
       });
     }
-
-    setUsername("");
-    setPassword("");
   };
 
   const handleLogout = () => {
@@ -143,6 +119,8 @@ const Index = () => {
       title: "Logged Out",
       description: "You have been logged out successfully",
     });
+    // Trigger re-render
+    navigate('/', { replace: true });
   };
 
   if (currentUser) {
@@ -192,7 +170,7 @@ const Index = () => {
             <WelcomeCard user={currentUser} />
             <QuickStatsCard user={currentUser} />
             <NavigationCard />
-            {currentUser?.isAdmin && <AdminPanel />}
+            {(currentUser?.isAdmin || currentUser?.is_admin) && <AdminPanel />}
           </div>
         </div>
       </div>
@@ -347,7 +325,7 @@ const QuickStatsCard = ({ user }: any) => {
                 Casino
               </Button>
             </Link>
-            {user?.isAdmin && (
+            {(user?.isAdmin || user?.is_admin) && (
               <Link to="/admin" className="flex-1">
                 <Button variant="outline" size="sm" className="w-full bg-red-50 border-red-200 text-red-600 hover:bg-red-100">
                   Admin
@@ -939,6 +917,209 @@ const AdminPanel = () => {
   );
 };
 
+const Authentication = () => {
+  const [signInUsername, setSignInUsername] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signUpUsername, setSignUpUsername] = useState("");
+  const [signUpPassword, setSignUpPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [user, setUser] = useState<any>(null);
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem('casinoUser');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+  }, []);
+
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    handleLogin();
+  };
+
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    handleRegister();
+  };
+
+  const handleRegister = async () => {
+    if (signUpPassword !== confirmPassword) {
+      toast({
+        title: "Error",
+        description: "Passwords do not match",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Try to register in Supabase first
+      const supabaseUser = await signUp(signUpUsername, signUpPassword);
+      if (supabaseUser) {
+        localStorage.setItem('casinoUser', JSON.stringify(supabaseUser));
+        setUser(supabaseUser);
+        toast({
+          title: "Registration successful!",
+          description: `Welcome, ${signUpUsername}!`,
+        });
+        // Navigate to trigger React Router re-render
+        setTimeout(() => navigate('/', { replace: true }), 500);
+        return;
+      }
+    } catch (error) {
+      console.error('Supabase registration failed, using localStorage fallback:', error);
+    }
+  };
+
+  const handleLogin = async () => {
+    if (!signInUsername || !signInPassword) {
+      toast({
+        title: "Missing credentials",
+        description: "Please enter both username and password",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Try Supabase login first
+      const supabaseUser = await signIn(signInUsername, signInPassword);
+      if (supabaseUser) {
+        localStorage.setItem('casinoUser', JSON.stringify(supabaseUser));
+        setUser(supabaseUser);
+        toast({
+          title: "Login successful!",
+          description: `Welcome back, ${signInUsername}!`,
+        });
+        // Navigate to trigger React Router re-render
+        setTimeout(() => navigate('/', { replace: true }), 500);
+        return;
+      }
+    } catch (error) {
+      console.error('Supabase login failed, trying localStorage fallback:', error);
+    }
+  };
+
+
+  if (user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900"></div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
+      <Card className="w-full max-w-md bg-white/10 backdrop-blur-lg border-white/20">
+        <CardHeader className="text-center">
+          <CardTitle className="text-3xl font-bold text-white flex items-center justify-center space-x-3">
+            <CheckelsIcon className="w-8 h-8 text-yellow-400" />
+            <span className="bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
+              ₵ Checkels
+            </span>
+          </CardTitle>
+          <p className="text-white/80 mt-2">
+            Sign In or Sign Up
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="sign-in" className="space-y-4">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="sign-in">Sign In</TabsTrigger>
+              <TabsTrigger value="sign-up">Sign Up</TabsTrigger>
+            </TabsList>
+            <TabsContent value="sign-in" className="space-y-4">
+              <form onSubmit={handleSignIn} className="space-y-4">
+                <div>
+                  <Label htmlFor="signInUsername" className="text-white/90">
+                    Username
+                  </Label>
+                  <Input
+                    id="signInUsername"
+                    type="text"
+                    value={signInUsername}
+                    onChange={(e) => setSignInUsername(e.target.value)}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                    placeholder="Enter your username"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="signInPassword" className="text-white/90">
+                    Password
+                  </Label>
+                  <Input
+                    id="signInPassword"
+                    type="password"
+                    value={signInPassword}
+                    onChange={(e) => setSignInPassword(e.target.value)}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                    placeholder="Enter your password"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                >
+                  Sign In
+                </Button>
+              </form>
+            </TabsContent>
+            <TabsContent value="sign-up" className="space-y-4">
+              <form onSubmit={handleSignUp} className="space-y-4">
+                <div>
+                  <Label htmlFor="signUpUsername" className="text-white/90">
+                    Username
+                  </Label>
+                  <Input
+                    id="signUpUsername"
+                    type="text"
+                    value={signUpUsername}
+                    onChange={(e) => setSignUpUsername(e.target.value)}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                    placeholder="Enter your username"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="signUpPassword" className="text-white/90">
+                    Password
+                  </Label>
+                  <Input
+                    id="signUpPassword"
+                    type="password"
+                    value={signUpPassword}
+                    onChange={(e) => setSignUpPassword(e.target.value)}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                    placeholder="Enter your password"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="confirmPassword" className="text-white/90">
+                    Confirm Password
+                  </Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
+                    placeholder="Confirm your password"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                >
+                  Sign Up
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
 
 export default Index;

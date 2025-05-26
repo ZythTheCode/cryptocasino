@@ -29,8 +29,10 @@ const AdminDashboard = () => {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
       
-      if (!parsedUser.isAdmin) {
-        window.location.href = '/';
+      if (!parsedUser.isAdmin && !parsedUser.is_admin) {
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 100);
         return;
       }
     } else {
@@ -176,7 +178,7 @@ const AdminDashboard = () => {
     return '💰';
   };
 
-  if (!user?.isAdmin) return null;
+  if (!user?.isAdmin && !user?.is_admin) return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">

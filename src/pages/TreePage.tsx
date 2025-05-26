@@ -1,20 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  TreePine,
-  Home,
-  Gamepad2,
-  Wallet,
-  Zap,
-  Clock,
-  History,
-  TrendingUp,
-} from "lucide-react";
-import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { TreePine, Home, Gamepad2, Wallet, ShoppingCart, Zap, Star, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
-import { getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, updateUserBalance, addTransaction as addDbTransaction } from "@/lib/database";
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { updateUserBalance, getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, addTransaction, signIn } from "@/lib/database";
 
 const calculateTreeLevel = (upgrades: any) => {
   if (!upgrades) return 1;
@@ -63,86 +54,28 @@ const TreePage = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("casinoUser");
-    if (savedUser) {
-      const userData = JSON.parse(savedUser);
-
-      // Initialize tree level if not exists
-      if (!userData.upgrades?.treeLevel) {
-        userData.upgrades = {
-          ...userData.upgrades,
-          treeLevel: 1,
-        };
+    const loadUserData = async () => {
+      const savedUser = localStorage.getItem("casinoUser");
+      if (savedUser) {
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+        
+        // Try to sync with Supabase to get latest data
+        try {
+          const freshUser = await signIn(userData.username, userData.password_hash || 'migrated_user');
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setUser(freshUser);
+        } catch (error) {
+          console.log('Using localStorage data, Supabase sync failed');
+          // Continue with localStorage data
+        }
+      } else {
+        // Redirect to home if no user data
+        window.location.href = "/";
       }
+    };
 
-      // Calculate offline earnings (notification only, not auto-added to balance)
-      const lastVisit = userData.treeLastVisit || Date.now();
-      const level = calculateTreeLevel(userData.upgrades);
-      const maxGenerationTime = calculateMaxGenerationTime(level);
-      const offlineTime = Math.min(
-        Date.now() - lastVisit,
-        maxGenerationTime * 1000,
-      );
-
-      if (offlineTime > 0) {
-        const baseCPS = calculateBaseCPS(level);
-        const offlineCoins = (offlineTime / 1000) * baseCPS;
-
-        if (offlineCoins > 0.001) {
-            // Add offline earnings to the current generation state
-            const savedGenerationState = localStorage.getItem(`tree_generation_${userData.username}`);
-            let generationState = savedGenerationState ? JSON.parse(savedGenerationState) : {
-              currentCheckels: 0,
-              lastClaimTime: Date.now(),
-              generationActive: true
-            };
-
-            // Add offline earnings to current checkels
-            generationState.currentCheckels = (generationState.currentCheckels || 0) + offlineCoins;
-
-            // Save updated generation state
-            localStorage.setItem(`tree_generation_${userData.username}`, JSON.stringify(generationState));
-
-            const offlineMinutes = Math.floor(offlineTime / 60000);
-            const maxMinutes = Math.floor(maxGenerationTime / 60);
-
-            // Add offline earnings transaction
-            const offlineTransaction = {
-              type: "offline_generation",
-              amount: offlineCoins,
-              timestamp: Date.now(),
-              description: `Offline generation (${offlineMinutes}/${maxMinutes} minutes)`,
-            };
-
-            const transactions = JSON.parse(
-              localStorage.getItem(`tree_transactions_${userData.username}`) || "[]",
-            );
-            transactions.unshift(offlineTransaction);
-            localStorage.setItem(
-              `tree_transactions_${userData.username}`,
-              JSON.stringify(transactions.slice(0, 50)),
-            );
-
-            setTimeout(() => {
-              toast({
-                title: "Welcome back!",
-                description: `${offlineCoins.toFixed(3)} ₵ Checkels generated while offline (${offlineMinutes}/${maxMinutes} minutes) and added to your current checkels!`,
-              });
-            }, 500);
-          }
-
-      }
-
-      userData.treeLastVisit = Date.now();
-      localStorage.setItem("casinoUser", JSON.stringify(userData));
-      const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
-      users[userData.username] = userData;
-      localStorage.setItem("casinoUsers", JSON.stringify(users));
-
-      setUser(userData);
-    } else {
-      window.location.href = "/";
-    }
+    loadUserData();
   }, []);
 
   if (!user) {
@@ -564,7 +497,7 @@ const TreeLevelingCard = ({ user, setUser }: any) => {
       });
 
       // Add transaction
-      await addDbTransaction({
+      await addTransaction({
         user_id: user.id,
         type: 'conversion',
         coins_amount: -upgradeCost,

@@ -1,8 +1,8 @@
-
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { updateUserBalance, addTransaction } from '@/lib/database';
 
 interface SlotMachineProps {
   user: any;
@@ -69,7 +69,7 @@ const SlotMachine = ({ user, onUpdateUser, onAddTransaction }: SlotMachineProps)
 
     setTimeout(() => {
       clearInterval(interval);
-      
+
       // Final result
       const finalReels = [
         symbols[Math.floor(Math.random() * symbols.length)],

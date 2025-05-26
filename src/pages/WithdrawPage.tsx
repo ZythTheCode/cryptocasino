@@ -1,13 +1,13 @@
-
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Home, TreePine, Gamepad2, Wallet, Banknote } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { DollarSign, CreditCard, Home, TreePine, Gamepad2, Wallet, Banknote } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { updateUserBalance, createWithdrawalRequest, addTransaction, signIn } from "@/lib/database";
 
 const WithdrawPage = () => {
   const [user, setUser] = useState<any>(null);
@@ -18,15 +18,31 @@ const WithdrawPage = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    } else {
-      window.location.href = '/';
-    }
+    const loadUserData = async () => {
+      const savedUser = localStorage.getItem('casinoUser');
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        setUser(parsedUser);
+        
+        // Sync with Supabase to get latest data
+        try {
+          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setUser(freshUser);
+        } catch (error) {
+          console.log('Using localStorage data, Supabase sync failed');
+        }
+      } else {
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 100);
+      }
+    };
+    
+    loadUserData();
   }, []);
 
-  const handleWithdraw = () => {
+  const handleWithdraw = async () => {
     if (!amount || !withdrawMethod || !accountNumber || !accountName) {
       toast({
         title: "Missing Information",
@@ -64,48 +80,53 @@ const WithdrawPage = () => {
       return;
     }
 
-    // Process withdrawal (demo - just update balance)
-    const updatedUser = {
-      ...user,
-      chips: Math.round((user.chips - chipsAmount) * 100) / 100
-    };
+    try {
+      // Update balance in Supabase
+      const updatedUser = await updateUserBalance(user.id, {
+        chips: Math.round((user.chips - chipsAmount) * 100) / 100
+      });
 
-    setUser(updatedUser);
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+      // Create withdrawal request in Supabase
+      await createWithdrawalRequest({
+        user_id: user.id,
+        username: user.username,
+        amount: chipsAmount,
+        withdrawal_method: withdrawMethod,
+        account_number: accountNumber,
+        account_name: accountName,
+        php_amount: chipsAmount * 10
+      });
 
-    // Update in users collection
-    const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-    users[updatedUser.username] = updatedUser;
-    localStorage.setItem('casinoUsers', JSON.stringify(users));
+      // Add transaction record in Supabase
+      await addTransaction({
+        user_id: user.id,
+        type: 'withdrawal',
+        amount: -chipsAmount,
+        description: `Withdrawal to ${withdrawMethod} - ${accountNumber}`
+      });
 
-    // Add transaction record
-    const transaction = {
-      type: 'withdrawal',
-      amount: -chipsAmount,
-      description: `Withdrawal to ${withdrawMethod} - ${accountNumber}`,
-      timestamp: new Date().toISOString(),
-      withdrawMethod,
-      accountNumber,
-      accountName,
-      phpAmount: chipsAmount * 10
-    };
-
-    const existingTransactions = JSON.parse(
-      localStorage.getItem(`casino_transactions_${user.username}`) || '[]'
-    );
-    const updatedTransactions = [transaction, ...existingTransactions].slice(0, 100);
-    localStorage.setItem(`casino_transactions_${user.username}`, JSON.stringify(updatedTransactions));
+      // Update local state
+      setUser(updatedUser);
+      localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
 
     toast({
-      title: "Withdrawal Successful!",
-      description: `₱${(chipsAmount * 10).toFixed(2)} will be sent to your ${withdrawMethod} account`,
-    });
+        title: "Withdrawal Successful!",
+        description: `₱${(chipsAmount * 10).toFixed(2)} will be sent to your ${withdrawMethod} account`,
+      });
 
-    // Reset form
-    setAmount('');
-    setWithdrawMethod('');
-    setAccountNumber('');
-    setAccountName('');
+      // Reset form
+      setAmount('');
+      setWithdrawMethod('');
+      setAccountNumber('');
+      setAccountName('');
+    } catch (error) {
+      console.error('Error processing withdrawal:', error);
+      toast({
+        title: "Withdrawal Failed",
+        description: "Failed to process withdrawal. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   if (!user) return null;

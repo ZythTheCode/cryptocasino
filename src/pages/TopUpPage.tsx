@@ -1,13 +1,13 @@
-
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Home, TreePine, Gamepad2, Wallet, CreditCard, Upload } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { Upload, CreditCard, Smartphone, Home, TreePine, Gamepad2, Wallet } from "lucide-react";
 import { Link } from "react-router-dom";
+import { createTopupRequest, signIn } from "@/lib/database";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 
 const TopUpPage = () => {
@@ -20,12 +20,28 @@ const TopUpPage = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    } else {
-      window.location.href = '/';
-    }
+    const loadUserData = async () => {
+      const savedUser = localStorage.getItem('casinoUser');
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        setUser(parsedUser);
+        
+        // Sync with Supabase to get latest data
+        try {
+          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setUser(freshUser);
+        } catch (error) {
+          console.log('Using localStorage data, Supabase sync failed');
+        }
+      } else {
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 100);
+      }
+    };
+    
+    loadUserData();
   }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -35,7 +51,7 @@ const TopUpPage = () => {
     }
   };
 
-  const handleSubmitTopUp = () => {
+  const handleSubmitTopUp = async () => {
     if (!amount || !paymentMethod || !receipt || !reference) {
       toast({
         title: "Missing Information",
@@ -55,42 +71,53 @@ const TopUpPage = () => {
       return;
     }
 
-    const topUpRequest = {
-      id: Date.now().toString(),
-      username: user.username,
-      amount: chipsAmount,
-      paymentMethod,
-      reference,
-      notes,
-      receiptName: receipt.name,
-      receiptSize: receipt.size,
-      timestamp: new Date().toISOString(),
-      status: 'pending'
-    };
+    try {
+      // Convert receipt to base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const receiptData = e.target?.result as string;
+        
+        const topUpRequestData = {
+          user_id: user.id,
+          username: user.username,
+          amount: chipsAmount,
+          payment_method: paymentMethod,
+          reference_number: reference,
+          notes,
+          receipt_name: receipt.name,
+          receipt_data: receiptData,
+          status: 'pending'
+        };
 
-    // Store in pending top-ups
-    const pendingTopUps = JSON.parse(localStorage.getItem('pendingTopUps') || '[]');
-    pendingTopUps.push(topUpRequest);
-    localStorage.setItem('pendingTopUps', JSON.stringify(pendingTopUps));
+        // Save to database
+        const success = await createTopupRequest(topUpRequestData);
+        
+        if (success) {
+          toast({
+            title: "Top-up Request Submitted",
+            description: `₱${(chipsAmount * 10).toFixed(2)} top-up request sent for admin approval`,
+          });
 
-    // Store receipt data (in real app this would be uploaded to server)
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      localStorage.setItem(`receipt_${topUpRequest.id}`, e.target?.result as string);
-    };
-    reader.readAsDataURL(receipt);
-
-    toast({
-      title: "Top-up Request Submitted",
-      description: `₱${(chipsAmount * 10).toFixed(2)} top-up request sent for admin approval`,
-    });
-
-    // Reset form
-    setAmount('');
-    setPaymentMethod('');
-    setReceipt(null);
-    setReference('');
-    setNotes('');
+          // Reset form
+          setAmount('');
+          setPaymentMethod('');
+          setReceipt(null);
+          setReference('');
+          setNotes('');
+        } else {
+          throw new Error('Failed to save top-up request');
+        }
+      };
+      
+      reader.readAsDataURL(receipt);
+    } catch (error) {
+      console.error('Error submitting top-up request:', error);
+      toast({
+        title: "Error",
+        description: "Failed to submit top-up request. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   if (!user) return null;
