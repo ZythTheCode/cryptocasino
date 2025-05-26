@@ -23,6 +23,8 @@ const CasinoPage = () => {
       const savedUser = localStorage.getItem('casinoUser');
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
+
+        // Set user immediately with localStorage data
         setUser(parsedUser);
 
         // Try to sync with Supabase to get latest data
@@ -31,8 +33,16 @@ const CasinoPage = () => {
           localStorage.setItem('casinoUser', JSON.stringify(freshUser));
           setUser(freshUser);
         } catch (error) {
-          console.log('Using localStorage data, Supabase sync failed');
-          // Continue with localStorage data
+          console.log('Using localStorage data, Supabase sync failed:', error);
+          // Ensure user has required fields for casino
+          const userWithDefaults = {
+            ...parsedUser,
+            coins: parsedUser.coins || 0,
+            chips: parsedUser.chips || 0,
+            isAdmin: parsedUser.isAdmin || parsedUser.is_admin || false
+          };
+          setUser(userWithDefaults);
+          localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
         }
       } else {
         // Redirect to home if no user data
@@ -350,53 +360,163 @@ const ComingSoonGame = ({ name, icon, description }: any) => {
 
 const AdminPanel = () => {
   const [showPanel, setShowPanel] = useState(false);
-  const [users, setUsers] = useState<any>({});
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
     if (showPanel) {
-      const savedUsers = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-      setUsers(savedUsers);
+      loadAllUsers();
     }
   }, [showPanel]);
 
-  const handleAddChips = (username: string, amount: number) => {
-    const updatedUsers = { ...users };
-    updatedUsers[username].chips = (updatedUsers[username].chips || 0) + amount;
-
-    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
-    setUsers(updatedUsers);
-
-    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
-    if (currentUser.username === username) {
-      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
+  const loadAllUsers = async () => {
+    try {
+      const { getAllUsers } = await import('@/lib/database');
+      const users = await getAllUsers();
+      setAllUsers(users);
+    } catch (error) {
+      console.error('Error loading users:', error);
+      // Fallback to localStorage
+      const savedUsers = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
+      const usersArray = Object.entries(savedUsers).map(([username, userData]: [string, any]) => ({
+        id: userData.id || username,
+        username,
+        ...userData
+      }));
+      setAllUsers(usersArray);
     }
-
-    toast({
-      title: "Chips Added",
-      description: `Added ${amount} chips to ${username}`,
-    });
   };
 
-  const handleResetChips = (username: string) => {
-    const updatedUsers = { ...users };
-    updatedUsers[username].chips = 0;
+  const handleAddCoins = async (userId: string, username: string, amount: number) => {
+    try {
+      const { addUserBalance } = await import('@/lib/database');
+      await addUserBalance(userId, amount, 0);
+      await loadAllUsers();
 
-    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
-    setUsers(updatedUsers);
+      toast({
+        title: "Checkels Added",
+        description: `Added ${amount} ₵ Checkels to ${username}`,
+      });
+    } catch (error) {
+      console.error('Error adding checkels:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add checkels",
+        variant: "destructive",
+      });
+    }
+  };
 
-    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
-    if (currentUser.username === username) {
-      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
+  const handleAddChips = async (userId: string, username: string, amount: number) => {
+    try {
+      const { addUserBalance } = await import('@/lib/database');
+      await addUserBalance(userId, 0, amount);
+      await loadAllUsers();
+
+      toast({
+        title: "Chips Added",
+        description: `Added ${amount} chips to ${username}`,
+      });
+    } catch (error) {
+      console.error('Error adding chips:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add chips",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleBanUser = async (userId: string, username: string, isBanned: boolean) => {
+    try {
+      const { banUser, unbanUser } = await import('@/lib/database');
+      if (isBanned) {
+        await unbanUser(userId);
+      } else {
+        await banUser(userId);
+      }
+      await loadAllUsers();
+
+      toast({
+        title: isBanned ? "User Unbanned" : "User Banned",
+        description: `${username} has been ${isBanned ? 'unbanned' : 'banned'}`,
+      });
+    } catch (error) {
+      console.error('Error banning/unbanning user:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update user status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleResetUser = async (userId: string, username: string) => {
+    try {
+      const { resetUserBalance } = await import('@/lib/database');
+      await resetUserBalance(userId);
+      await loadAllUsers();
+
+      toast({
+        title: "User Reset",
+        description: `${username}'s balance has been reset`,
+      });
+    } catch (error) {
+      console.error('Error resetting user:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reset user balance",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, username: string) => {
+    if (!confirm(`Are you sure you want to delete ${username}? This action cannot be undone.`)) {
+      return;
     }
 
-    localStorage.removeItem(`transactions_${username}`);
-    localStorage.removeItem(`casino_transactions_${username}`);
+    try {
+      const { deleteUser } = await import('@/lib/database');
+      await deleteUser(userId);
+      await loadAllUsers();
+
+      toast({
+        title: "User Deleted",
+        description: `${username} has been deleted`,
+      });
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const clearAllLocalStorageData = () => {
+    // Get all localStorage keys
+    const keys = Object.keys(localStorage);
+
+    // Remove all casino-related data
+    keys.forEach(key => {
+      if (key.includes('casino') || 
+          key.includes('tree_') || 
+          key.includes('transactions_') || 
+          key.includes('pendingTopUps') ||
+          key.includes('receipt_')) {
+        localStorage.removeItem(key);
+      }
+    });
 
     toast({
-      title: "User Reset",
-      description: `${username}'s chips and transactions have been reset`,
+      title: "LocalStorage Cleared",
+      description: "All casino data has been removed from localStorage. Page will reload...",
     });
+
+    // Reload the page
+    setTimeout(() => window.location.reload(), 1500);
   };
 
   if (showPanel) {
@@ -414,24 +534,42 @@ const AdminPanel = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4 max-h-64 overflow-y-auto">
-            {Object.entries(users).map(([username, userData]: [string, any]) => (
-              <div key={username} className="p-3 bg-white rounded border">
-                <div className="flex justify-between items-center">
-                  <div className="flex-1">
-                    <h3 className="font-bold">
-                      {username} {userData.isAdmin && <span className="text-red-500 text-sm">(Admin)</span>}
-                    </h3>
-                    <div className="text-sm text-gray-600">
-                      Chips: <span className="font-medium text-green-600">{userData.chips || 0}</span>
+          <div className="space-y-4 max-h-80 overflow-y-auto">
+            {allUsers.map((userData: any) => (
+              <div key={userData.id} className="p-3 bg-white rounded border">
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div className="flex-1">
+                      <h3 className="font-bold flex items-center space-x-2">
+                        <span>{userData.username}</span>
+                        {userData.is_admin && <span className="text-red-500 text-xs bg-red-100 px-2 py-1 rounded">Admin</span>}
+                        {userData.is_banned && <span className="text-red-600 text-xs bg-red-100 px-2 py-1 rounded">🚫 Banned</span>}
+                      </h3>
+                      <div className="text-sm text-gray-600 grid grid-cols-2 gap-2">
+                        <span>₵ Checkels: <span className="font-medium text-yellow-600">{(userData.coins || 0).toFixed(2)}</span></span>
+                        <span>Chips: <span className="font-medium text-green-600">{(userData.chips || 0).toFixed(2)}</span></span>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex space-x-1">
-                    <Button size="sm" variant="outline" onClick={() => handleAddChips(username, 100)}>
-                      +100
+                  <div className="flex flex-wrap gap-1">
+                    <Button size="sm" variant="outline" onClick={() => handleAddCoins(userData.id, userData.username, 100)}>
+                      +100 ₵
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={() => handleResetChips(username)}>
+                    <Button size="sm" variant="outline" onClick={() => handleAddChips(userData.id, userData.username, 100)}>
+                      +100 Chips
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={userData.is_banned ? "default" : "destructive"} 
+                      onClick={() => handleBanUser(userData.id, userData.username, userData.is_banned)}
+                    >
+                      {userData.is_banned ? "Unban" : "Ban"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleResetUser(userData.id, userData.username)}>
                       Reset
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={() => handleDeleteUser(userData.id, userData.username)}>
+                      Delete
                     </Button>
                   </div>
                 </div>
@@ -439,6 +577,34 @@ const AdminPanel = () => {
             ))}
           </div>
         </CardContent>
+        <div className="mt-4 p-4 bg-red-50 rounded-lg border border-red-200">
+            <h4 className="text-lg font-semibold text-red-700 mb-2">Danger Zone</h4>
+            <p className="text-sm text-red-600 mb-3">These actions are irreversible!</p>
+            <div className="space-y-2">
+              <Button
+                variant="destructive" 
+                size="sm" 
+                onClick={clearAllLocalStorageData}
+                className="w-full"
+              >
+                🧹 Clear ALL LocalStorage Data
+              </Button>
+              <Button
+                variant="destructive" 
+                size="sm" 
+                onClick={() => {
+                  allUsers.forEach(userData => {
+                    if (!userData.is_admin) {
+                      handleResetUser(userData.id, userData.username);
+                    }
+                  });
+                }}
+                className="w-full"
+              >
+                💥 Reset All User Accounts
+              </Button>
+            </div>
+          </div>
       </Card>
     );
   }
@@ -455,6 +621,56 @@ const AdminPanel = () => {
         <Button variant="outline" className="w-full" onClick={() => setShowPanel(true)}>
           Open Casino Admin
         </Button>
+      </CardContent>
+    </Card>
+  );
+};
+
+const TransactionHistory = ({ user }: any) => {
+  const [transactions, setTransactions] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      const savedTransactions = localStorage.getItem(`casino_transactions_${user.username}`);
+      setTransactions(savedTransactions ? JSON.parse(savedTransactions) : []);
+    }
+  }, [user]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <DollarSign className="w-6 h-6 text-green-500" />
+          <span>Transaction History</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {transactions.slice(0, 50).map((transaction, index) => (
+            <div
+              key={index}
+              className="p-2 bg-white rounded border text-sm flex justify-between items-center"
+            >
+              <div className="flex-1">
+                <p className="font-medium">{transaction.description}</p>
+                <p className="text-xs text-gray-500">
+                  {new Date(transaction.timestamp).toLocaleString()}
+                </p>
+              </div>
+              <div
+                className={`font-bold ${transaction.amount >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {transaction.amount >= 0 ? "+" : ""}
+                {transaction.amount} Chips
+              </div>
+            </div>
+          ))}
+          {transactions.length === 0 && (
+            <p className="text-center text-gray-500 text-sm py-4">
+              No transactions yet
+            </p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

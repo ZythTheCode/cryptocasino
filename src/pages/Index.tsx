@@ -31,7 +31,7 @@ const Index = () => {
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setCurrentUser(parsedUser);
-      
+
       // Sync with Supabase to get latest data
       syncUserWithSupabase(parsedUser);
     }
@@ -41,7 +41,7 @@ const Index = () => {
     try {
       // Get fresh user data from Supabase
       const freshUser = await signIn(localUser.username, localUser.password_hash || 'migrated_user');
-      
+
       // Update localStorage with fresh data
       localStorage.setItem('casinoUser', JSON.stringify(freshUser));
       setCurrentUser(freshUser);
@@ -577,6 +577,34 @@ const AdminPanel = () => {
     setTimeout(() => window.location.reload(), 1000);
   };
 
+  const clearAllLocalStorageData = () => {
+    // Get all localStorage keys
+    const keys = Object.keys(localStorage);
+
+    // Remove all casino-related data
+    keys.forEach(key => {
+      if (key.includes('casino') || 
+          key.includes('tree_') || 
+          key.includes('transactions_') || 
+          key.includes('pendingTopUps') ||
+          key.includes('receipt_')) {
+        localStorage.removeItem(key);
+      }
+    });
+
+    // Reset states
+    setUsers({});
+    setCurrentUser(null);
+
+    toast({
+      title: "LocalStorage Cleared",
+      description: "All casino data has been removed from localStorage. Page will reload...",
+    });
+
+    // Reload the page
+    setTimeout(() => window.location.reload(), 1500);
+  };
+
   const getTotalStats = () => {
     const userList = Object.values(users);
     const nonAdminUsers = userList.filter((user: any) => !user.isAdmin);
@@ -888,6 +916,13 @@ const AdminPanel = () => {
                   className="w-full"
                 >
                   💥 Reset All User Accounts
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={clearAllLocalStorageData}
+                  className="w-full"
+                >
+                  💣 Clear All LocalStorage Data
                 </Button>
               </div>
             </div>

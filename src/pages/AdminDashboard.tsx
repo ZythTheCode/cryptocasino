@@ -24,23 +24,33 @@ const AdminDashboard = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setUser(parsedUser);
-      
-      if (!parsedUser.isAdmin && !parsedUser.is_admin) {
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 100);
+    const loadUserAndData = async () => {
+      const savedUser = localStorage.getItem('casinoUser');
+      if (!savedUser) {
+        window.location.href = '/';
         return;
       }
-    } else {
-      window.location.href = '/';
-      return;
-    }
 
-    loadData();
+      const parsedUser = JSON.parse(savedUser);
+      
+      // Check if user is admin
+      if (!parsedUser.isAdmin && !parsedUser.is_admin) {
+        toast({
+          title: "Access Denied",
+          description: "You don't have admin privileges",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 2000);
+        return;
+      }
+
+      setUser(parsedUser);
+      await loadData();
+    };
+
+    loadUserAndData();
   }, []);
 
   const loadData = async () => {
@@ -51,37 +61,18 @@ const AdminDashboard = () => {
 
       // Load all users from Supabase
       const users = await getAllUsers();
-      const usersObject = users.reduce((acc: any, user: any) => {
-        acc[user.username] = user;
-        return acc;
-      }, {});
-      setAllUsers(usersObject);
+      setAllUsers(users);
 
       // Load all transactions from Supabase
       const transactions = await getAllTransactions(100);
       setAllTransactions(transactions);
     } catch (error) {
       console.error('Error loading data from Supabase:', error);
-      
-      // Fallback to localStorage if Supabase fails
-      console.log('Falling back to localStorage...');
-      const pending = JSON.parse(localStorage.getItem('pendingTopUps') || '[]');
-      setPendingTopUps(pending);
-
-      const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-      setAllUsers(users);
-
-      const allTx: any[] = [];
-      Object.keys(users).forEach(username => {
-        const userTx = JSON.parse(localStorage.getItem(`casino_transactions_${username}`) || '[]');
-        const conversionTx = JSON.parse(localStorage.getItem(`transactions_${username}`) || '[]');
-        
-        userTx.forEach((tx: any) => allTx.push({ ...tx, username }));
-        conversionTx.forEach((tx: any) => allTx.push({ ...tx, username }));
+      toast({
+        title: "Database Error",
+        description: "Failed to load data from database. Please check your connection.",
+        variant: "destructive",
       });
-      
-      allTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      setAllTransactions(allTx.slice(0, 100));
     }
   };
 
@@ -91,7 +82,10 @@ const AdminDashboard = () => {
 
     try {
       // Update user balance in Supabase
-      const targetUser = Object.values(allUsers).find((u: any) => u.username === topUp.username);
+      const targetUser = Array.isArray(allUsers) 
+        ? allUsers.find((u: any) => u.username === topUp.username)
+        : Object.values(allUsers).find((u: any) => u.username === topUp.username);
+      
       if (!targetUser) {
         toast({
           title: "Error",
@@ -300,22 +294,23 @@ const AdminDashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4">
-                  {Object.entries(allUsers).map(([username, userData]: [string, any]) => (
-                    <div key={username} className="border rounded-lg p-4 bg-white">
+                  {(Array.isArray(allUsers) ? allUsers : Object.values(allUsers)).map((userData: any) => (
+                    <div key={userData.id || userData.username} className="border rounded-lg p-4 bg-white">
                       <div className="flex justify-between items-center">
                         <div>
                           <h3 className="font-semibold text-lg flex items-center space-x-2">
-                            <span>{username}</span>
-                            {userData.isAdmin && <Badge>Admin</Badge>}
+                            <span>{userData.username}</span>
+                            {(userData.is_admin || userData.isAdmin) && <Badge>Admin</Badge>}
+                            {userData.is_banned && <Badge variant="destructive">Banned</Badge>}
                           </h3>
                           <div className="flex space-x-4 text-sm text-gray-600 mt-1">
                             <span>₵ Checkels: {(userData.coins || 0).toFixed(2)}</span>
                             <span>Chips: {(userData.chips || 0).toFixed(2)}</span>
-                            <span>Tree Level: {userData.upgrades?.treeLevel || 1}</span>
                           </div>
                         </div>
                         <div className="text-right text-sm text-gray-500">
                           <p>Total Value: ₱{((userData.chips || 0) * 10).toFixed(2)}</p>
+                          <p>Joined: {new Date(userData.created_at).toLocaleDateString()}</p>
                         </div>
                       </div>
                     </div>
