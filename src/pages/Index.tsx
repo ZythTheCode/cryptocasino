@@ -345,6 +345,13 @@ const QuickStatsCard = ({ user }: any) => {
                 Casino
               </Button>
             </Link>
+            {user?.isAdmin && (
+              <Link to="/admin" className="flex-1">
+                <Button variant="outline" size="sm" className="w-full bg-red-50 border-red-200 text-red-600 hover:bg-red-100">
+                  Admin
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
       </CardContent>

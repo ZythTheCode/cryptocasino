@@ -10,6 +10,7 @@ import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 const WalletPage = () => {
   const [user, setUser] = useState<any>(null);
   const [convertAmount, setConvertAmount] = useState(0.01);
+  const [chipConvertAmount, setChipConvertAmount] = useState(10);
   const [transactions, setTransactions] = useState<any[]>([]);
   const { toast } = useToast();
 
@@ -60,6 +61,45 @@ const WalletPage = () => {
     toast({
       title: "Conversion successful!",
       description: `Converted ${roundedAmount.toFixed(2)} ₵ Checkels to ${chipsEarned.toFixed(2)} chips`,
+    });
+  };
+
+  const handleChipConvert = () => {
+    if (!user || chipConvertAmount > user.chips || chipConvertAmount < 10) {
+      toast({
+        title: chipConvertAmount < 10 ? "Minimum Amount" : "Insufficient Chips",
+        description: chipConvertAmount < 10 ? "Minimum conversion amount is 10 chips" : "You don't have enough chips to convert",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const roundedChips = Math.round(chipConvertAmount);
+    const checkelsEarned = roundedChips / 10;
+
+    const updatedUser = {
+      ...user,
+      chips: Math.round((user.chips - roundedChips) * 100) / 100,
+      coins: Math.round((user.coins + checkelsEarned) * 100) / 100
+    };
+
+    const newTransaction = {
+      type: 'chip_conversion',
+      chipsAmount: roundedChips,
+      coinsAmount: checkelsEarned,
+      timestamp: new Date().toISOString()
+    };
+
+    const updatedTransactions = [newTransaction, ...transactions];
+    localStorage.setItem(`transactions_${user.username}`, JSON.stringify(updatedTransactions.slice(0, 50)));
+    setTransactions(updatedTransactions);
+
+    setUser(updatedUser);
+    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+
+    toast({
+      title: "Conversion successful!",
+      description: `Converted ${roundedChips} chips to ${checkelsEarned.toFixed(2)} ₵ Checkels`,
     });
   };
 
@@ -153,51 +193,143 @@ const WalletPage = () => {
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-blue-700 flex items-center space-x-2">
-              <CheckelsIcon className="w-6 h-6" />
-              <span>Convert ₵ Checkels to Chips</span>
-            </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
-                <div className="text-center mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="font-bold text-xl text-blue-700">1 ₵ Checkel = 10 Casino Chips</p>
-                  <p className="text-sm text-blue-600 mt-1">Minimum conversion: 0.01 ₵ Checkels</p>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium mb-2 text-gray-700">Convert Amount:</label>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      max={user?.coins || 0}
-                      value={convertAmount}
-                      onChange={(e) => {
-                        const value = parseFloat(e.target.value) || 0.01;
-                        setConvertAmount(Math.max(0.01, Math.min(value, user?.coins || 0)));
-                      }}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
-                      placeholder="0.01"
-                    />
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card className="bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-blue-700 flex items-center space-x-2">
+                <CheckelsIcon className="w-6 h-6" />
+                <span>₵ Checkels → Chips</span>
+              </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
+                  <div className="text-center mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <p className="font-bold text-xl text-blue-700">1 ₵ Checkel = 10 Casino Chips</p>
+                    <p className="text-sm text-blue-600 mt-1">Minimum conversion: 0.01 ₵ Checkels</p>
                   </div>
-                  <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
-                    <p className="text-sm text-gray-600">You will receive:</p>
-                    <p className="font-bold text-xl text-green-600">{(convertAmount * 10).toFixed(2)} Chips</p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-2 text-gray-700">Convert Amount:</label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        max={user?.coins || 0}
+                        value={convertAmount}
+                        onChange={(e) => {
+                          const value = parseFloat(e.target.value) || 0.01;
+                          setConvertAmount(Math.max(0.01, Math.min(value, user?.coins || 0)));
+                        }}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
+                        placeholder="0.01"
+                      />
+                    </div>
+                    <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
+                      <p className="text-sm text-gray-600">You will receive:</p>
+                      <p className="font-bold text-xl text-green-600">{(convertAmount * 10).toFixed(2)} Chips</p>
+                    </div>
+                    <Button 
+                      onClick={handleConvert} 
+                      className="w-full py-3 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700" 
+                      disabled={!user?.coins || convertAmount < 0.01 || convertAmount > user.coins}
+                    >
+                      Convert {convertAmount.toFixed(2)} ₵ Checkels → {(convertAmount * 10).toFixed(2)} Chips
+                    </Button>
                   </div>
-                  <Button 
-                    onClick={handleConvert} 
-                    className="w-full py-3 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700" 
-                    disabled={!user?.coins || convertAmount < 0.01 || convertAmount > user.coins}
-                  >
-                    Convert {convertAmount.toFixed(2)} ₵ Checkels → {(convertAmount * 10).toFixed(2)} Chips
-                  </Button>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-purple-700 flex items-center space-x-2">
+                <ChipsIcon className="w-6 h-6" />
+                <span>Chips → ₵ Checkels</span>
+              </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
+                  <div className="text-center mb-4 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                    <p className="font-bold text-xl text-purple-700">10 Casino Chips = 1 ₵ Checkel</p>
+                    <p className="text-sm text-purple-600 mt-1">Minimum conversion: 10 Chips</p>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-2 text-gray-700">Chips to Convert:</label>
+                      <input
+                        type="number"
+                        min="10"
+                        step="10"
+                        max={user?.chips || 0}
+                        value={chipConvertAmount}
+                        onChange={(e) => {
+                          const value = parseFloat(e.target.value) || 10;
+                          setChipConvertAmount(Math.max(10, Math.min(value, user?.chips || 0)));
+                        }}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-lg"
+                        placeholder="10"
+                      />
+                    </div>
+                    <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                      <p className="text-sm text-gray-600">You will receive:</p>
+                      <p className="font-bold text-xl text-yellow-600">{(chipConvertAmount / 10).toFixed(2)} ₵ Checkels</p>
+                    </div>
+                    <Button 
+                      onClick={handleChipConvert} 
+                      className="w-full py-3 text-lg bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" 
+                      disabled={!user?.chips || chipConvertAmount < 10 || chipConvertAmount > user.chips}
+                    >
+                      Convert {chipConvertAmount.toFixed(0)} Chips → {(chipConvertAmount / 10).toFixed(2)} ₵ Checkels
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-green-700 flex items-center space-x-2">
+                  <span className="text-2xl">💳</span>
+                  <span>Buy Chips</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center space-y-4">
+                  <div className="text-4xl mb-4">💰</div>
+                  <p className="text-gray-600">Purchase chips with real money</p>
+                  <p className="font-bold text-green-600">1 Chip = ₱10 PHP</p>
+                  <Link to="/topup">
+                    <Button className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700">
+                      Top Up Chips
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-br from-orange-50 to-red-50 border-orange-200 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-orange-700 flex items-center space-x-2">
+                  <span className="text-2xl">🏧</span>
+                  <span>Withdraw</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center space-y-4">
+                  <div className="text-4xl mb-4">💸</div>
+                  <p className="text-gray-600">Convert chips back to cash</p>
+                  <p className="font-bold text-orange-600">1 Chip = ₱10 PHP</p>
+                  <Link to="/withdraw">
+                    <Button className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700">
+                      Withdraw Chips
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
           <Card className="bg-gradient-to-br from-gray-50 to-slate-50 border-gray-200 shadow-lg">
             <CardHeader>
