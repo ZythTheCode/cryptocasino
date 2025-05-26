@@ -1,118 +1,173 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Coins, Home, TreePine, Gamepad2, Wallet } from "lucide-react";
+import {
+  TreePine,
+  Home,
+  Gamepad2,
+  Wallet,
+  Zap,
+  Clock,
+  History,
+  TrendingUp,
+} from "lucide-react";
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
+import { getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, updateUserBalance, addTransaction as addDbTransaction } from "@/lib/database";
 
-import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+const calculateTreeLevel = (upgrades: any) => {
+  if (!upgrades) return 1;
+  return upgrades.treeLevel || 1;
+};
 
-const WalletPage = () => {
+const calculateBaseCPS = (level: number) => {
+  return 0.00167 * Math.pow(1.1, level - 1);
+};
+
+const calculateBonusYield = (level: number) => {
+  return Math.floor(level * 0.5); // 0.5% per level
+};
+
+const calculateMaxGenerationTime = (level: number) => {
+  const baseTime = 1800; // 30 minutes base
+  const storageMultiplier = 1 + (level - 1) * 0.1; // 10% increase per level
+  return Math.floor(baseTime * storageMultiplier);
+};
+
+const calculateLevelUpCost = (currentLevel: number) => {
+  return Math.floor(100 * Math.pow(1.5, currentLevel - 1));
+};
+
+const getTreeImage = (level: number) => {
+  if (level >= 80) return "🌳"; // Ancient Tree
+  if (level >= 60) return "🌲"; // Mature Tree
+  if (level >= 40) return "🌱"; // Growing Tree
+  if (level >= 20) return "🪴"; // Young Tree
+  return "🌿"; // Seedling
+};
+
+const formatDuration = (seconds: number) => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  } else {
+    return `${minutes}m`;
+  }
+};
+
+const TreePage = () => {
   const [user, setUser] = useState<any>(null);
-  const [convertAmount, setConvertAmount] = useState(0.01);
-  const [chipConvertAmount, setChipConvertAmount] = useState(10);
-  const [transactions, setTransactions] = useState<any[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
+    const savedUser = localStorage.getItem("casinoUser");
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      const savedTransactions = localStorage.getItem(`transactions_${JSON.parse(savedUser).username}`);
-      setTransactions(savedTransactions ? JSON.parse(savedTransactions) : []);
+      const userData = JSON.parse(savedUser);
+
+      // Initialize tree level if not exists
+      if (!userData.upgrades?.treeLevel) {
+        userData.upgrades = {
+          ...userData.upgrades,
+          treeLevel: 1,
+        };
+      }
+
+      // Calculate offline earnings (notification only, not auto-added to balance)
+      const lastVisit = userData.treeLastVisit || Date.now();
+      const level = calculateTreeLevel(userData.upgrades);
+      const maxGenerationTime = calculateMaxGenerationTime(level);
+      const offlineTime = Math.min(
+        Date.now() - lastVisit,
+        maxGenerationTime * 1000,
+      );
+
+      if (offlineTime > 0) {
+        const baseCPS = calculateBaseCPS(level);
+        const offlineCoins = (offlineTime / 1000) * baseCPS;
+
+        if (offlineCoins > 0.001) {
+            // Add offline earnings to the current generation state
+            const savedGenerationState = localStorage.getItem(`tree_generation_${userData.username}`);
+            let generationState = savedGenerationState ? JSON.parse(savedGenerationState) : {
+              currentCheckels: 0,
+              lastClaimTime: Date.now(),
+              generationActive: true
+            };
+
+            // Add offline earnings to current checkels
+            generationState.currentCheckels = (generationState.currentCheckels || 0) + offlineCoins;
+
+            // Save updated generation state
+            localStorage.setItem(`tree_generation_${userData.username}`, JSON.stringify(generationState));
+
+            const offlineMinutes = Math.floor(offlineTime / 60000);
+            const maxMinutes = Math.floor(maxGenerationTime / 60);
+
+            // Add offline earnings transaction
+            const offlineTransaction = {
+              type: "offline_generation",
+              amount: offlineCoins,
+              timestamp: Date.now(),
+              description: `Offline generation (${offlineMinutes}/${maxMinutes} minutes)`,
+            };
+
+            const transactions = JSON.parse(
+              localStorage.getItem(`tree_transactions_${userData.username}`) || "[]",
+            );
+            transactions.unshift(offlineTransaction);
+            localStorage.setItem(
+              `tree_transactions_${userData.username}`,
+              JSON.stringify(transactions.slice(0, 50)),
+            );
+
+            setTimeout(() => {
+              toast({
+                title: "Welcome back!",
+                description: `${offlineCoins.toFixed(3)} ₵ Checkels generated while offline (${offlineMinutes}/${maxMinutes} minutes) and added to your current checkels!`,
+              });
+            }, 500);
+          }
+
+      }
+
+      userData.treeLastVisit = Date.now();
+      localStorage.setItem("casinoUser", JSON.stringify(userData));
+      const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+      users[userData.username] = userData;
+      localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+      setUser(userData);
     } else {
-      window.location.href = '/';
+      window.location.href = "/";
     }
   }, []);
 
-  const handleConvert = () => {
-    if (!user || convertAmount > user.coins || convertAmount < 0.01) {
-      toast({
-        title: convertAmount < 0.01 ? "Minimum Amount" : "Insufficient ₵ Checkels",
-        description: convertAmount < 0.01 ? "Minimum conversion amount is 0.01 ₵ Checkels" : "You don't have enough ₵ Checkels to convert",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const roundedAmount = Math.round(convertAmount * 100) / 100; // Round to 2 decimal places
-    const chipsEarned = roundedAmount * 10;
-
-    const updatedUser = {
-      ...user,
-      coins: Math.round((user.coins - roundedAmount) * 100) / 100,
-      chips: Math.round((user.chips + chipsEarned) * 100) / 100
-    };
-
-    const newTransaction = {
-      type: 'conversion',
-      coinsAmount: roundedAmount,
-      chipsAmount: chipsEarned,
-      timestamp: new Date().toISOString()
-    };
-
-    const updatedTransactions = [newTransaction, ...transactions];
-    localStorage.setItem(`transactions_${user.username}`, JSON.stringify(updatedTransactions.slice(0, 50)));
-    setTransactions(updatedTransactions);
-
-    setUser(updatedUser);
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-
-    toast({
-      title: "Conversion successful!",
-      description: `Converted ${roundedAmount.toFixed(2)} ₵ Checkels to ${chipsEarned.toFixed(2)} chips`,
-    });
-  };
-
-  const handleChipConvert = () => {
-    if (!user || chipConvertAmount > user.chips || chipConvertAmount < 10) {
-      toast({
-        title: chipConvertAmount < 10 ? "Minimum Amount" : "Insufficient Chips",
-        description: chipConvertAmount < 10 ? "Minimum conversion amount is 10 chips" : "You don't have enough chips to convert",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const roundedChips = Math.round(chipConvertAmount);
-    const checkelsEarned = roundedChips / 10;
-
-    const updatedUser = {
-      ...user,
-      chips: Math.round((user.chips - roundedChips) * 100) / 100,
-      coins: Math.round((user.coins + checkelsEarned) * 100) / 100
-    };
-
-    const newTransaction = {
-      type: 'chip_conversion',
-      chipsAmount: roundedChips,
-      coinsAmount: checkelsEarned,
-      timestamp: new Date().toISOString()
-    };
-
-    const updatedTransactions = [newTransaction, ...transactions];
-    localStorage.setItem(`transactions_${user.username}`, JSON.stringify(updatedTransactions.slice(0, 50)));
-    setTransactions(updatedTransactions);
-
-    setUser(updatedUser);
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-
-    toast({
-      title: "Conversion successful!",
-      description: `Converted ${roundedChips} chips to ${checkelsEarned.toFixed(2)} ₵ Checkels`,
-    });
-  };
-
-  if (!user) return null;
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">
+        <Card>
+          <CardContent className="p-6">
+            <p>Please log in to access the Tree</p>
+            <Link to="/">
+              <Button className="mt-4">Go to Login</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
-      <header className="bg-gradient-to-r from-indigo-800/90 to-purple-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
+    <div className="min-h-screen bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">
+      <header className="bg-gradient-to-r from-green-800/90 to-blue-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <h1 className="text-3xl font-bold text-white flex items-center space-x-3">
-            <Wallet className="w-8 h-8 text-purple-400" />
-            <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-              ₵ Checkels Wallet
+            <TreePine className="w-8 h-8 text-green-400" />
+            <span className="bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+              Money Tree Farm
             </span>
           </h1>
           <div className="flex items-center space-x-6">
@@ -135,33 +190,33 @@ const WalletPage = () => {
               <span className="text-white/90 font-medium">Welcome, {user?.username}</span>
               <div className="flex space-x-2">
                 <Link to="/">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30"
                   >
                     <Home className="w-4 h-4" />
                     <span>Home</span>
                   </Button>
                 </Link>
-                <Link to="/tree">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="flex items-center space-x-2 bg-green-500/20 border-green-400/30 text-green-100 hover:bg-green-500/30"
-                  >
-                    <TreePine className="w-4 h-4" />
-                    <span>Tree</span>
-                  </Button>
-                </Link>
                 <Link to="/casino">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     className="flex items-center space-x-2 bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30"
                   >
                     <Gamepad2 className="w-4 h-4" />
                     <span>Casino</span>
+                  </Button>
+                </Link>
+                <Link to="/wallet">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-indigo-500/20 border-indigo-400/30 text-indigo-100 hover:bg-indigo-500/30"
+                  >
+                    <Wallet className="w-4 h-4" />
+                    <span>Wallet</span>
                   </Button>
                 </Link>
               </div>
@@ -169,207 +224,675 @@ const WalletPage = () => {
           </div>
         </div>
       </header>
-
-      <div className="max-w-4xl mx-auto p-6">
-        <div className="grid gap-6">
-          <Card className="bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-200 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-purple-700 flex items-center space-x-2">
-                <Wallet className="w-6 h-6" />
-                <span>Balance Overview</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4 p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
-                <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                  <p className="text-sm text-gray-600 mb-1">Available ₵ Checkels</p>
-                  <p className="font-bold text-2xl text-yellow-600">{(user.coins || 0).toFixed(2)}</p>
-                </div>
-                <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
-                  <p className="text-sm text-gray-600 mb-1">Casino Chips</p>
-                  <p className="font-bold text-2xl text-green-600">{(user.chips || 0).toFixed(2)}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card className="bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200 shadow-lg">
-              <CardHeader>
-                <CardTitle className="text-blue-700 flex items-center space-x-2">
-                <CheckelsIcon className="w-6 h-6" />
-                <span>₵ Checkels → Chips</span>
-              </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
-                  <div className="text-center mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                    <p className="font-bold text-xl text-blue-700">1 ₵ Checkel = 10 Casino Chips</p>
-                    <p className="text-sm text-blue-600 mt-1">Minimum conversion: 0.01 ₵ Checkels</p>
-                  </div>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm font-medium mb-2 text-gray-700">Convert Amount:</label>
-                      <input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        max={user?.coins || 0}
-                        value={convertAmount}
-                        onChange={(e) => {
-                          const value = parseFloat(e.target.value) || 0.01;
-                          setConvertAmount(Math.max(0.01, Math.min(value, user?.coins || 0)));
-                        }}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
-                        placeholder="0.01"
-                      />
-                    </div>
-                    <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
-                      <p className="text-sm text-gray-600">You will receive:</p>
-                      <p className="font-bold text-xl text-green-600">{(convertAmount * 10).toFixed(2)} Chips</p>
-                    </div>
-                    <Button 
-                      onClick={handleConvert} 
-                      className="w-full py-3 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700" 
-                      disabled={!user?.coins || convertAmount < 0.01 || convertAmount > user.coins}
-                    >
-                      Convert {convertAmount.toFixed(2)} ₵ Checkels → {(convertAmount * 10).toFixed(2)} Chips
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200 shadow-lg">
-              <CardHeader>
-                <CardTitle className="text-purple-700 flex items-center space-x-2">
-                <ChipsIcon className="w-6 h-6" />
-                <span>Chips → ₵ Checkels</span>
-              </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
-                  <div className="text-center mb-4 p-3 bg-purple-50 rounded-lg border border-purple-200">
-                    <p className="font-bold text-xl text-purple-700">10 Casino Chips = 1 ₵ Checkel</p>
-                    <p className="text-sm text-purple-600 mt-1">Minimum conversion: 10 Chips</p>
-                  </div>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm font-medium mb-2 text-gray-700">Chips to Convert:</label>
-                      <input
-                        type="number"
-                        min="10"
-                        step="10"
-                        max={user?.chips || 0}
-                        value={chipConvertAmount}
-                        onChange={(e) => {
-                          const value = parseFloat(e.target.value) || 10;
-                          setChipConvertAmount(Math.max(10, Math.min(value, user?.chips || 0)));
-                        }}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-lg"
-                        placeholder="10"
-                      />
-                    </div>
-                    <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                      <p className="text-sm text-gray-600">You will receive:</p>
-                      <p className="font-bold text-xl text-yellow-600">{(chipConvertAmount / 10).toFixed(2)} ₵ Checkels</p>
-                    </div>
-                    <Button 
-                      onClick={handleChipConvert} 
-                      className="w-full py-3 text-lg bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" 
-                      disabled={!user?.chips || chipConvertAmount < 10 || chipConvertAmount > user.chips}
-                    >
-                      Convert {chipConvertAmount.toFixed(0)} Chips → {(chipConvertAmount / 10).toFixed(2)} ₵ Checkels
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 shadow-lg">
-              <CardHeader>
-                <CardTitle className="text-green-700 flex items-center space-x-2">
-                  <span className="text-2xl">💳</span>
-                  <span>Buy Chips</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center space-y-4">
-                  <div className="text-4xl mb-4">💰</div>
-                  <p className="text-gray-600">Purchase chips with real money</p>
-                  <p className="font-bold text-green-600">1 Chip = ₱10 PHP</p>
-                  <Link to="/topup">
-                    <Button className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700">
-                      Top Up Chips
-                    </Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-br from-orange-50 to-red-50 border-orange-200 shadow-lg">
-              <CardHeader>
-                <CardTitle className="text-orange-700 flex items-center space-x-2">
-                  <span className="text-2xl">🏧</span>
-                  <span>Withdraw</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center space-y-4">
-                  <div className="text-4xl mb-4">💸</div>
-                  <p className="text-gray-600">Convert chips back to cash</p>
-                  <p className="font-bold text-orange-600">1 Chip = ₱10 PHP</p>
-                  <Link to="/withdraw">
-                    <Button className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700">
-                      Withdraw Chips
-                    </Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card className="bg-gradient-to-br from-gray-50 to-slate-50 border-gray-200 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-gray-700 flex items-center space-x-2">
-                <span className="text-xl">📋</span>
-                <span>Transaction History</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {transactions.map((tx, index) => (
-                  <div key={index} className="p-4 bg-white rounded-lg border shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="font-medium text-gray-700">
-                        Converted {(tx.coinsAmount || 0).toFixed(2)} ₵ Checkels
-                      </span>
-                      <span className="font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full">
-                        +{(tx.chipsAmount || 0).toFixed(2)} chips
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500 flex items-center space-x-1">
-                      <span>🕒</span>
-                      <span>{new Date(tx.timestamp).toLocaleString()}</span>
-                    </div>
-                  </div>
-                ))}
-                {transactions.length === 0 && (
-                  <div className="text-center py-8">
-                    <span className="text-6xl mb-4 block">💳</span>
-                    <p className="text-gray-500">No transactions yet</p>
-                    <p className="text-sm text-gray-400 mt-1">Your conversion history will appear here</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <MoneyTreeCard user={user} setUser={setUser} />
+          <TreeLevelingCard user={user} setUser={setUser} />
+          <BoosterStore user={user} setUser={setUser} />
+          <TransactionHistory user={user} />
         </div>
       </div>
     </div>
   );
 };
 
-export default WalletPage;
+const MoneyTreeCard = ({ user, setUser }: any) => {
+  const { toast } = useToast();
+  const [currentCheckels, setCurrentCheckels] = useState(0);
+  const [lastClaimTime, setLastClaimTime] = useState(Date.now());
+  const [generationActive, setGenerationActive] = useState(true);
+
+  const level = calculateTreeLevel(user?.upgrades);
+  const baseCPS = calculateBaseCPS(level);
+  const bonusYield = calculateBonusYield(level);
+  const maxGenerationTime = calculateMaxGenerationTime(level);
+
+  // Calculate total booster multiplier from active boosters
+  const activeBoosters = user?.activeBoosters || [];
+  const now = Date.now();
+  const validBoosters = activeBoosters.filter(
+    (booster: any) => now < booster.endTime,
+  );
+  const totalMultiplier = validBoosters.reduce(
+    (total: number, booster: any) => total * booster.multiplier,
+    1,
+  );
+
+  const finalCPS = baseCPS * totalMultiplier;
+
+  useEffect(() => {
+    const savedGenerationState = localStorage.getItem(
+      `tree_generation_${user?.username}`,
+    );
+    if (savedGenerationState) {
+      const state = JSON.parse(savedGenerationState);
+      setCurrentCheckels(state.currentCheckels || 0);
+      setLastClaimTime(state.lastClaimTime || Date.now());
+      setGenerationActive(state.generationActive !== false);
+    }
+  }, [user?.username]);
+
+  const saveGenerationState = () => {
+    if (user?.username) {
+      const state = {
+        currentCheckels,
+        lastClaimTime,
+        generationActive,
+      };
+      localStorage.setItem(
+        `tree_generation_${user.username}`,
+        JSON.stringify(state),
+      );
+    }
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+
+      const activeBoosters = user?.activeBoosters || [];
+      const validBoosters = activeBoosters.filter(
+        (booster: any) => now < booster.endTime,
+      );
+
+      if (validBoosters.length !== activeBoosters.length) {
+        const updatedUser = {
+          ...user,
+          activeBoosters: validBoosters,
+        };
+        setUser(updatedUser);
+        localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+        const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+        users[user.username] = updatedUser;
+        localStorage.setItem("casinoUsers", JSON.stringify(users));
+      }
+
+      const timeElapsed = (now - lastClaimTime) / 1000;
+
+      if (timeElapsed <= maxGenerationTime && generationActive) {
+        setCurrentCheckels((prev) => prev + finalCPS);
+      } else {
+        setGenerationActive(false);
+      }
+
+      saveGenerationState();
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [
+    lastClaimTime,
+    finalCPS,
+    maxGenerationTime,
+    user?.activeBoosters,
+    currentCheckels,
+    generationActive,
+    user,
+  ]);
+
+  useEffect(() => {
+    saveGenerationState();
+  }, [user?.upgrades, finalCPS, maxGenerationTime]);
+
+  const claimCheckels = () => {
+    if (currentCheckels === 0) {
+      toast({
+        title: "No Checkels to claim",
+        description: "Wait for Checkels to generate",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let finalCheckels = currentCheckels;
+
+    // Apply bonus yield
+    if (bonusYield > 0) {
+      finalCheckels *= 1 + (bonusYield / 100);
+    }
+
+    const updatedUser = {
+      ...user,
+      coins: user.coins + finalCheckels,
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+    const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+    users[user.username] = updatedUser;
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+    const transaction = {
+      type: "claim",
+      amount: finalCheckels,
+      timestamp: Date.now(),
+      description: "Claimed Checkels from tree",
+    };
+
+    const transactions = JSON.parse(
+      localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
+    );
+    transactions.unshift(transaction);
+    localStorage.setItem(
+      `tree_transactions_${user.username}`,
+      JSON.stringify(transactions.slice(0, 50)),
+    );
+
+    updatedUser.treeLastVisit = Date.now();
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+    users[user.username] = updatedUser;
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+    const newClaimTime = Date.now();
+    setCurrentCheckels(0);
+    setLastClaimTime(newClaimTime);
+    setGenerationActive(true);
+
+    saveGenerationState();
+
+    toast({
+      title: "Checkels claimed!",
+      description: `You earned ${finalCheckels.toFixed(3)} ₵Checkels`,
+    });
+  };
+
+  return (
+    <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          <span className="flex items-center space-x-2">
+            <span className="text-4xl">{getTreeImage(level)}</span>
+            <span className="text-green-700">Level {level} Tree</span>
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div className="text-center p-4 bg-white rounded-lg border">
+            <p className="text-2xl font-bold text-green-600">
+              ₵{currentCheckels.toFixed(3)}
+            </p>
+            <p className="text-sm text-gray-600">Current Checkels</p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-sm">
+            <div className="text-center p-2 bg-green-50 rounded">
+              <p className="font-medium">CPS</p>
+              <p className="text-green-600 font-bold">
+                {finalCPS.toFixed(5)}
+              </p>
+              {totalMultiplier > 1 && (
+                <p className="text-xs text-orange-600">
+                  {totalMultiplier.toFixed(1)}x Boost
+                </p>
+              )}
+            </div>
+            <div className="text-center p-2 bg-purple-50 rounded">
+              <p className="font-medium">Bonus Yield</p>
+              <p className="text-purple-600 font-bold">
+                +{bonusYield}%
+              </p>
+            </div>
+            <div className="text-center p-2 bg-blue-50 rounded">
+              <p className="font-medium">Max Duration</p>
+              <p className="text-blue-600 font-bold">
+                {formatDuration(maxGenerationTime)}
+              </p>
+            </div>
+          </div>
+
+          {!generationActive && (
+            <div className="text-center text-red-600 text-sm">
+              No ₵Checkels generating – please claim to restart
+            </div>
+          )}
+
+          <Button
+            onClick={claimCheckels}
+            className="w-full bg-green-600 hover:bg-green-700"
+          >
+            Claim ₵ Checkels
+          </Button>
+
+          {/* Generation Timer */}
+          <div className="text-center p-2 bg-blue-50 rounded">
+            <p className="text-sm font-medium text-blue-700">Generation Timer</p>
+            <p className="text-xs text-blue-600">
+              {formatDuration(Math.floor((Date.now() - lastClaimTime) / 1000))} / {formatDuration(maxGenerationTime)}
+            </p>
+            <div className="w-full bg-blue-200 rounded-full h-1.5 mt-1">
+              <div 
+                className="bg-blue-600 h-1.5 rounded-full transition-all duration-1000"
+                style={{ 
+                  width: `${Math.min(100, ((Date.now() - lastClaimTime) / 1000 / maxGenerationTime) * 100)}%` 
+                }}
+              ></div>
+            </div>
+          </div>
+
+          {/* Active Boosters Display */}
+          <div className="space-y-2">
+            <h4 className="font-medium text-sm">Active Boosters</h4>
+            {validBoosters.length > 0 ? (
+              <div className="space-y-2">
+                {validBoosters.map((booster: any, index: number) => {
+                  const timeLeft = Math.max(0, (booster.endTime - Date.now()) / 1000 / 60);
+                  const totalDuration = 30; // Assuming original duration, adjust based on booster type
+                  const progressPercentage = Math.max(0, (timeLeft / totalDuration) * 100);
+
+                  return (
+                    <div
+                      key={index}
+                      className="bg-orange-100 p-3 rounded border"
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm font-medium text-orange-700">
+                          {booster.multiplier}x Boost
+                        </span>
+                        <span className="text-xs text-orange-600">
+                          {Math.ceil(timeLeft)}m left
+                        </span>
+                      </div>
+                      <div className="w-full bg-orange-200 rounded-full h-2">
+                        <div 
+                          className="bg-orange-500 h-2 rounded-full transition-all duration-1000"
+                          style={{ width: `${progressPercentage}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">No active boosters</p>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+const TreeLevelingCard = ({ user, setUser }: any) => {
+  const { toast } = useToast();
+  const [treeUpgrade, setTreeUpgrade] = useState<any>(null);
+  const currentLevel = calculateTreeLevel(user?.upgrades);
+  const nextLevel = currentLevel + 1;
+  const upgradeCost = calculateLevelUpCost(currentLevel);
+
+  const currentCPS = calculateBaseCPS(currentLevel);
+  const currentBonusYield = calculateBonusYield(currentLevel);
+  const currentMaxTime = calculateMaxGenerationTime(currentLevel);
+
+  const nextCPS = calculateBaseCPS(nextLevel);
+  const nextBonusYield = calculateBonusYield(nextLevel);
+  const nextMaxTime = calculateMaxGenerationTime(nextLevel);
+
+  const canUpgrade = user?.coins >= upgradeCost;
+
+  useEffect(() => {
+    const loadTreeUpgrade = async () => {
+      if (user) {
+        try {
+          let upgrade = await getTreeUpgrade(user.id);
+          if (!upgrade) {
+            upgrade = await createTreeUpgrade(user.id);
+          }
+          setTreeUpgrade(upgrade);
+        } catch (error) {
+          console.error('Error loading tree upgrade:', error);
+        }
+      }
+    };
+
+    loadTreeUpgrade();
+  }, [user]);
+
+  const upgradeTree = async () => {
+    if (!treeUpgrade || user.coins < upgradeCost) return;
+
+    try {
+      // Update tree level
+      const newTreeUpgrade = await updateTreeUpgrade(user.id, {
+        tree_level: treeUpgrade.tree_level + 1
+      });
+
+      // Update user coins
+      const updatedUser = await updateUserBalance(user.id, {
+        coins: Math.round((user.coins - upgradeCost) * 100) / 100
+      });
+
+      // Add transaction
+      await addDbTransaction({
+        user_id: user.id,
+        type: 'conversion',
+        coins_amount: -upgradeCost,
+        description: `Upgraded tree to level ${newTreeUpgrade.tree_level}`,
+      });
+
+      setTreeUpgrade(newTreeUpgrade);
+      setUser(updatedUser);
+      localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+
+      toast({
+        title: "Tree Upgraded!",
+        description: `Your tree is now level ${newTreeUpgrade.tree_level}! Production increased to ${newTreeUpgrade.tree_level * 0.1}/hour.`,
+      });
+    } catch (error) {
+      console.error('Error upgrading tree:', error);
+      toast({
+        title: "Error",
+        description: "Failed to upgrade tree",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <TrendingUp className="w-6 h-6 text-blue-600" />
+          <span className="text-blue-700">Tree Leveling</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div className="text-center p-3 bg-white rounded border">
+            <p className="text-lg font-bold text-blue-600">
+              Level {currentLevel}
+            </p>
+            <p className="text-sm text-gray-500">Unlimited Growth</p>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="font-medium text-sm text-gray-700">Current Stats</h4>
+            <div className="grid grid-cols-1 gap-2 text-sm">
+              <div className="flex justify-between p-2 bg-green-50 rounded">
+                <span>CPS:</span>
+                <span className="font-bold">{currentCPS.toFixed(5)}</span>
+              </div>
+              <div className="flex justify-between p-2 bg-purple-50 rounded">
+                <span>Bonus Yield:</span>
+                <span className="font-bold">+{currentBonusYield}%</span>
+              </div>
+              <div className="flex justify-between p-2 bg-blue-50 rounded">
+                <span>Max Duration:</span>
+                <span className="font-bold">
+                  {formatDuration(currentMaxTime)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="font-medium text-sm text-gray-700">Next Level ({nextLevel}) Stats</h4>
+            <div className="grid grid-cols-1 gap-2 text-sm">
+              <div className="flex justify-between p-2 bg-green-100 rounded">
+                <span>CPS:</span>
+                <span className="font-bold text-green-600">
+                  {nextCPS.toFixed(5)} 
+                  <span className="text-xs ml-1">
+                    (+{((nextCPS - currentCPS) / currentCPS * 100).toFixed(1)}%)
+                  </span>
+                </span>
+              </div>
+              <div className="flex justify-between p-2 bg-purple-100 rounded">
+                <span>Bonus Yield:</span>
+                <span className="font-bold text-purple-600">
+                  +{nextBonusYield}%
+                  <span className="text-xs ml-1">
+                    (+{nextBonusYield - currentBonusYield}%)
+                  </span>
+                </span>
+              </div>
+              <div className="flex justify-between p-2 bg-blue-100 rounded">
+                <span>Max Duration:</span>
+                <span className="font-bold text-blue-600">
+                  {formatDuration(nextMaxTime)}
+                  <span className="text-xs ml-1">
+                    (+{formatDuration(nextMaxTime - currentMaxTime)})
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <Button
+            onClick={upgradeTree}
+            disabled={!canUpgrade}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
+          >
+            {canUpgrade ? (
+              <span className="flex items-center space-x-2">
+                <CheckelsIcon className="w-4 h-4" />
+                <span>Upgrade to Level {nextLevel} ({upgradeCost} ₵ Checkels)</span>
+              </span>
+            ) : (
+              <span>Need {upgradeCost} ₵ Checkels</span>
+            )}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+const BoosterStore = ({ user, setUser }: any) => {
+  const { toast } = useToast();
+
+  const boosters = [
+    {
+      name: "2x Speed Boost",
+      multiplier: 2,
+      duration: 30,
+      cost: 100,
+      description: "Double your CPS for 30 minutes",
+    },
+    {
+      name: "3x Speed Boost",
+      multiplier: 3,
+      duration: 20,
+      cost: 200,
+      description: "Triple your CPS for 20 minutes",
+    },
+    {
+      name: "5x Speed Boost",
+      multiplier: 5,
+      duration: 10,
+      cost: 400,
+      description: "5x your CPS for 10 minutes",
+    },
+  ];
+
+  const isBoosterActive = (boosterMultiplier: number) => {
+    const activeBoosters = user?.activeBoosters || [];
+    const now = Date.now();
+    return activeBoosters.some(
+      (booster: any) =>
+        booster.multiplier === boosterMultiplier && now < booster.endTime,
+    );
+  };
+
+  const activateBooster = (booster: any) => {
+    if (isBoosterActive(booster.multiplier)) {
+      toast({
+        title: "Booster already active",
+        description: `${booster.multiplier}x booster is currently running`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (user.coins < booster.cost) {
+      toast({
+        title: "Insufficient ₵ Checkels",
+        description: `You need ${booster.cost} ₵ Checkels to purchase this booster`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const newBooster = {
+      multiplier: booster.multiplier,
+      endTime: Date.now() + booster.duration * 60 * 1000,
+      name: booster.name,
+    };
+
+    const updatedUser = {
+      ...user,
+      coins: user.coins - booster.cost,
+      activeBoosters: [...(user.activeBoosters || []), newBooster],
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+    const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+    users[user.username] = updatedUser;
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+    const transaction = {
+      type: "booster",
+      amount: -booster.cost,
+      timestamp: Date.now(),
+      description: `Purchased ${booster.name}`,
+    };
+
+    const transactions = JSON.parse(
+      localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
+    );
+    transactions.unshift(transaction);
+    localStorage.setItem(
+      `tree_transactions_${user.username}`,
+      JSON.stringify(transactions.slice(0, 50)),
+    );
+
+    toast({
+      title: "Booster activated!",
+      description: `${booster.multiplier}x CPS for ${booster.duration} minutes`,
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <Zap className="w-6 h-6 text-orange-500" />
+          <span>Booster Store</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          {boosters.map((booster, index) => {
+            const isActive = isBoosterActive(booster.multiplier);
+            return (
+              <div
+                key={index}
+                className={`p-3 border rounded ${isActive ? "bg-gradient-to-r from-green-50 to-emerald-50 border-green-300" : "bg-gradient-to-r from-orange-50 to-yellow-50"}`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex-1">
+                    <p
+                      className={`font-medium ${isActive ? "text-green-700" : "text-orange-700"}`}
+                    >
+                      {booster.name}
+                      {isActive && (
+                        <span className="ml-2 text-xs bg-green-200 px-2 py-1 rounded">
+                          ACTIVE
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {booster.description}
+                    </p>
+                    <p
+                      className={`text-xs mt-1 ${isActive ? "text-green-600" : "text-orange-600"}`}
+                    >
+                      {booster.multiplier}x CPS for {booster.duration} minutes
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => activateBooster(booster)}
+                    disabled={isActive}
+                    variant="outline"
+                    size="sm"
+                    className={
+                      isActive
+                        ? "border-green-300 text-green-700 bg-green-100 cursor-not-allowed"
+                        : "border-orange-300 text-orange-700 hover:bg-orange-100"
+                    }
+                  >
+                    {isActive ? (
+                      <span className="text-xs">Active</span>
+                    ) : (
+                      <span className="flex items-center space-x-1">
+                        <CheckelsIcon className="w-3 h-3" />
+                        <span>{booster.cost}</span>
+                      </span>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+const TransactionHistory = ({ user }: any) => {
+  const [transactions, setTransactions] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      const savedTransactions = localStorage.getItem(
+        `tree_transactions_${user.username}`,
+      );
+      setTransactions(savedTransactions ? JSON.parse(savedTransactions) : []);
+    }
+  }, [user]);
+
+  return (
+    <Card className="lg:col-span-3">
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <History className="w-6 h-6 text-blue-500" />
+          <span>Transaction History</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {transactions.slice(0, 50).map((transaction, index) => (
+            <div
+              key={index}
+              className="p-2 bg-white rounded border text-sm flex justify-between items-center"
+            >
+              <div className="flex-1">
+                <p className="font-medium">{transaction.description}</p>
+                <p className="text-xs text-gray-500">
+                  {new Date(transaction.timestamp).toLocaleString()}
+                </p>
+              </div>
+              <div
+                className={`font-bold ${transaction.amount >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {transaction.amount >= 0 ? "+" : ""}
+                {transaction.amount.toFixed(3)} ₵ Checkels
+              </div>
+            </div>
+          ))}
+          {transactions.length === 0 && (
+            <p className="text-center text-gray-500 text-sm py-4">
+              No transactions yet
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+export default TreePage;

@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
-import { TreePine, Gamepad2, Wallet, Settings, Home } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { Gamepad2, Wallet, TreePine, Settings } from "lucide-react";
 import { Link } from "react-router-dom";
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { signIn, signUp } from "@/lib/database";
 import { useLocation } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -420,18 +422,18 @@ const AdminPanel = () => {
 
   const handleSaveChanges = () => {
     localStorage.setItem("casinoUsers", JSON.stringify(users));
-    
+
     // Update current user if they were modified
     const updatedCurrentUser = users[currentUser.username];
     if (updatedCurrentUser) {
       localStorage.setItem("casinoUser", JSON.stringify(updatedCurrentUser));
     }
-    
+
     toast({
       title: "Changes Saved",
       description: "Page will reload to apply changes...",
     });
-    
+
     // Force page reload after a short delay to show the toast
     setTimeout(() => {
       window.location.reload();
@@ -783,7 +785,7 @@ const AdminPanel = () => {
               </div>
             ))}
           </div>
-          
+
           {pendingChanges && (
             <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
               <div className="flex items-center justify-between">

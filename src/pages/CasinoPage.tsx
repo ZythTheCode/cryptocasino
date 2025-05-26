@@ -12,10 +12,12 @@ import Blackjack from "@/components/games/Blackjack";
 import Baccarat from "@/components/games/Baccarat";
 import Minebomb from "@/components/games/Minebomb";
 import TransactionHistory from "@/components/TransactionHistory";
+import { updateUserBalance, addTransaction as addDbTransaction } from "@/lib/database";
 
 const CasinoPage = () => {
   const [user, setUser] = useState<any>(null);
   const [selectedGame, setSelectedGame] = useState<string>('');
+  const { toast } = useToast();
 
   useEffect(() => {
     const savedUser = localStorage.getItem('casinoUser');
@@ -26,25 +28,39 @@ const CasinoPage = () => {
     }
   }, []);
 
-  const updateUser = (updatedUser: any) => {
-    setUser(updatedUser);
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+  const updateUser = async (updatedUser: any) => {
+    try {
+      // Update in database
+      const dbUser = await updateUserBalance(updatedUser.id, {
+        coins: updatedUser.coins,
+        chips: updatedUser.chips
+      });
 
-    // Update in users collection
-    const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-    users[updatedUser.username] = updatedUser;
-    localStorage.setItem('casinoUsers', JSON.stringify(users));
+      // Update local state
+      setUser(dbUser);
+      localStorage.setItem('casinoUser', JSON.stringify(dbUser));
+    } catch (error) {
+      console.error('Error updating user:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update user balance",
+        variant: "destructive",
+      });
+    }
   };
 
-  const addTransaction = (transaction: any) => {
-    if (!user) return;
-
-    const existingTransactions = JSON.parse(
-      localStorage.getItem(`casino_transactions_${user.username}`) || '[]'
-    );
-
-    const updatedTransactions = [transaction, ...existingTransactions].slice(0, 100); // Keep last 100
-    localStorage.setItem(`casino_transactions_${user.username}`, JSON.stringify(updatedTransactions));
+  const addTransaction = async (transaction: any) => {
+    try {
+      await addDbTransaction({
+        user_id: user.id,
+        type: transaction.type,
+        game: transaction.game,
+        amount: transaction.amount,
+        description: transaction.description
+      });
+    } catch (error) {
+      console.error('Error adding transaction:', error);
+    }
   };
 
   if (!user) {

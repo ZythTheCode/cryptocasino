@@ -7,6 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Home, CheckCircle, XCircle, Eye, Users, Activity } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
+import { 
+  getAllUsers, 
+  getPendingTopupRequests, 
+  getAllTransactions, 
+  updateTopupRequestStatus,
+  updateUserBalance,
+  addTransaction 
+} from "@/lib/database";
 
 const AdminDashboard = () => {
   const [user, setUser] = useState<any>(null);
@@ -30,89 +38,123 @@ const AdminDashboard = () => {
       return;
     }
 
-    // Load pending top-ups
-    const pending = JSON.parse(localStorage.getItem('pendingTopUps') || '[]');
-    setPendingTopUps(pending);
-
-    // Load all users
-    const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-    setAllUsers(users);
-
-    // Load all transactions from all users
-    const allTx: any[] = [];
-    Object.keys(users).forEach(username => {
-      const userTx = JSON.parse(localStorage.getItem(`casino_transactions_${username}`) || '[]');
-      const conversionTx = JSON.parse(localStorage.getItem(`transactions_${username}`) || '[]');
-      
-      userTx.forEach((tx: any) => allTx.push({ ...tx, username }));
-      conversionTx.forEach((tx: any) => allTx.push({ ...tx, username }));
-    });
-    
-    allTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    setAllTransactions(allTx.slice(0, 100)); // Latest 100 transactions
+    loadData();
   }, []);
 
-  const handleApproveTopUp = (topUpId: string) => {
+  const loadData = async () => {
+    try {
+      // Load pending top-ups from Supabase
+      const pendingRequests = await getPendingTopupRequests();
+      setPendingTopUps(pendingRequests);
+
+      // Load all users from Supabase
+      const users = await getAllUsers();
+      const usersObject = users.reduce((acc: any, user: any) => {
+        acc[user.username] = user;
+        return acc;
+      }, {});
+      setAllUsers(usersObject);
+
+      // Load all transactions from Supabase
+      const transactions = await getAllTransactions(100);
+      setAllTransactions(transactions);
+    } catch (error) {
+      console.error('Error loading data from Supabase:', error);
+      
+      // Fallback to localStorage if Supabase fails
+      console.log('Falling back to localStorage...');
+      const pending = JSON.parse(localStorage.getItem('pendingTopUps') || '[]');
+      setPendingTopUps(pending);
+
+      const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
+      setAllUsers(users);
+
+      const allTx: any[] = [];
+      Object.keys(users).forEach(username => {
+        const userTx = JSON.parse(localStorage.getItem(`casino_transactions_${username}`) || '[]');
+        const conversionTx = JSON.parse(localStorage.getItem(`transactions_${username}`) || '[]');
+        
+        userTx.forEach((tx: any) => allTx.push({ ...tx, username }));
+        conversionTx.forEach((tx: any) => allTx.push({ ...tx, username }));
+      });
+      
+      allTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setAllTransactions(allTx.slice(0, 100));
+    }
+  };
+
+  const handleApproveTopUp = async (topUpId: string) => {
     const topUp = pendingTopUps.find(t => t.id === topUpId);
     if (!topUp) return;
 
-    // Update user balance
-    const users = { ...allUsers };
-    users[topUp.username].chips = (users[topUp.username].chips || 0) + topUp.amount;
+    try {
+      // Update user balance in Supabase
+      const targetUser = Object.values(allUsers).find((u: any) => u.username === topUp.username);
+      if (!targetUser) {
+        toast({
+          title: "Error",
+          description: "User not found",
+          variant: "destructive",
+        });
+        return;
+      }
 
-    // Add transaction
-    const transaction = {
-      type: 'topup',
-      amount: topUp.amount,
-      description: `Top-up approved via ${topUp.paymentMethod} - ${topUp.reference}`,
-      timestamp: new Date().toISOString(),
-      phpAmount: topUp.amount * 10
-    };
+      await updateUserBalance(targetUser.id, {
+        chips: (targetUser.chips || 0) + topUp.amount
+      });
 
-    const existingTransactions = JSON.parse(
-      localStorage.getItem(`casino_transactions_${topUp.username}`) || '[]'
-    );
-    const updatedTransactions = [transaction, ...existingTransactions].slice(0, 100);
-    localStorage.setItem(`casino_transactions_${topUp.username}`, JSON.stringify(updatedTransactions));
+      // Add transaction to Supabase
+      await addTransaction({
+        user_id: targetUser.id,
+        type: 'topup',
+        amount: topUp.amount,
+        description: `Top-up approved via ${topUp.paymentMethod} - ${topUp.reference}`,
+        php_amount: topUp.amount * 10
+      });
 
-    // Update storage
-    localStorage.setItem('casinoUsers', JSON.stringify(users));
-    setAllUsers(users);
+      // Update top-up request status
+      await updateTopupRequestStatus(topUpId, 'approved', user.username);
 
-    // Update current user if it's the same
-    if (user.username === topUp.username) {
-      const updatedCurrentUser = users[topUp.username];
-      localStorage.setItem('casinoUser', JSON.stringify(updatedCurrentUser));
-      setUser(updatedCurrentUser);
+      // Reload data
+      await loadData();
+
+      toast({
+        title: "Top-up Approved",
+        description: `${topUp.amount} chips added to ${topUp.username}`,
+      });
+
+    } catch (error) {
+      console.error('Error approving top-up:', error);
+      toast({
+        title: "Error",
+        description: "Failed to approve top-up. Please try again.",
+        variant: "destructive",
+      });
     }
-
-    // Remove from pending
-    const updatedPending = pendingTopUps.filter(t => t.id !== topUpId);
-    localStorage.setItem('pendingTopUps', JSON.stringify(updatedPending));
-    setPendingTopUps(updatedPending);
-
-    // Remove receipt
-    localStorage.removeItem(`receipt_${topUpId}`);
-
-    toast({
-      title: "Top-up Approved",
-      description: `${topUp.amount} chips added to ${topUp.username}`,
-    });
   };
 
-  const handleRejectTopUp = (topUpId: string) => {
-    const updatedPending = pendingTopUps.filter(t => t.id !== topUpId);
-    localStorage.setItem('pendingTopUps', JSON.stringify(updatedPending));
-    setPendingTopUps(updatedPending);
+  const handleRejectTopUp = async (topUpId: string) => {
+    try {
+      // Update top-up request status
+      await updateTopupRequestStatus(topUpId, 'rejected', user.username);
 
-    // Remove receipt
-    localStorage.removeItem(`receipt_${topUpId}`);
+      // Reload data
+      await loadData();
 
-    toast({
-      title: "Top-up Rejected",
-      description: "Top-up request has been rejected",
-      variant: "destructive",
-    });
+      toast({
+        title: "Top-up Rejected",
+        description: "Top-up request has been rejected",
+        variant: "destructive",
+      });
+
+    } catch (error) {
+      console.error('Error rejecting top-up:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reject top-up. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const viewReceipt = (topUpId: string) => {

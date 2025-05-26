@@ -96,6 +96,21 @@ ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE topup_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE withdrawal_requests ENABLE ROW LEVEL SECURITY;
 
+-- RLS Policies for users table (allow both anon and postgres roles)
+CREATE POLICY "Allow public access to users" ON users FOR ALL USING (true) WITH CHECK (true);
+
+-- RLS Policies for tree_upgrades table
+CREATE POLICY "Allow public access to tree_upgrades" ON tree_upgrades FOR ALL USING (true) WITH CHECK (true);
+
+-- RLS Policies for transactions table
+CREATE POLICY "Allow public access to transactions" ON transactions FOR ALL USING (true) WITH CHECK (true);
+
+-- RLS Policies for topup_requests table
+CREATE POLICY "Allow public access to topup_requests" ON topup_requests FOR ALL USING (true) WITH CHECK (true);
+
+-- RLS Policies for withdrawal_requests table
+CREATE POLICY "Allow public access to withdrawal_requests" ON withdrawal_requests FOR ALL USING (true) WITH CHECK (true);
+
 -- Users can only see their own data (except admins)
 CREATE POLICY "Users can view own data" ON users
   FOR SELECT USING (auth.uid()::text = id::text OR is_admin = true);

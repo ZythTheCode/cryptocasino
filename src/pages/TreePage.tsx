@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +14,7 @@ import {
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
+import { getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, updateUserBalance, addTransaction as addDbTransaction } from "@/lib/database";
 
 const calculateTreeLevel = (upgrades: any) => {
   if (!upgrades) return 1;
@@ -98,7 +99,7 @@ const TreePage = () => {
 
             // Add offline earnings to current checkels
             generationState.currentCheckels = (generationState.currentCheckels || 0) + offlineCoins;
-            
+
             // Save updated generation state
             localStorage.setItem(`tree_generation_${userData.username}`, JSON.stringify(generationState));
 
@@ -515,6 +516,7 @@ const MoneyTreeCard = ({ user, setUser }: any) => {
 
 const TreeLevelingCard = ({ user, setUser }: any) => {
   const { toast } = useToast();
+  const [treeUpgrade, setTreeUpgrade] = useState<any>(null);
   const currentLevel = calculateTreeLevel(user?.upgrades);
   const nextLevel = currentLevel + 1;
   const upgradeCost = calculateLevelUpCost(currentLevel);
@@ -529,52 +531,62 @@ const TreeLevelingCard = ({ user, setUser }: any) => {
 
   const canUpgrade = user?.coins >= upgradeCost;
 
-  const upgradeTree = () => {
-    if (!canUpgrade) {
+  useEffect(() => {
+    const loadTreeUpgrade = async () => {
+      if (user) {
+        try {
+          let upgrade = await getTreeUpgrade(user.id);
+          if (!upgrade) {
+            upgrade = await createTreeUpgrade(user.id);
+          }
+          setTreeUpgrade(upgrade);
+        } catch (error) {
+          console.error('Error loading tree upgrade:', error);
+        }
+      }
+    };
+
+    loadTreeUpgrade();
+  }, [user]);
+
+  const upgradeTree = async () => {
+    if (!treeUpgrade || user.coins < upgradeCost) return;
+
+    try {
+      // Update tree level
+      const newTreeUpgrade = await updateTreeUpgrade(user.id, {
+        tree_level: treeUpgrade.tree_level + 1
+      });
+
+      // Update user coins
+      const updatedUser = await updateUserBalance(user.id, {
+        coins: Math.round((user.coins - upgradeCost) * 100) / 100
+      });
+
+      // Add transaction
+      await addDbTransaction({
+        user_id: user.id,
+        type: 'conversion',
+        coins_amount: -upgradeCost,
+        description: `Upgraded tree to level ${newTreeUpgrade.tree_level}`,
+      });
+
+      setTreeUpgrade(newTreeUpgrade);
+      setUser(updatedUser);
+      localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+
       toast({
-        title: "Insufficient ₵ Checkels",
-        description: `You need ${upgradeCost} ₵ Checkels to upgrade to level ${nextLevel}`,
+        title: "Tree Upgraded!",
+        description: `Your tree is now level ${newTreeUpgrade.tree_level}! Production increased to ${newTreeUpgrade.tree_level * 0.1}/hour.`,
+      });
+    } catch (error) {
+      console.error('Error upgrading tree:', error);
+      toast({
+        title: "Error",
+        description: "Failed to upgrade tree",
         variant: "destructive",
       });
-      return;
     }
-
-    const updatedUser = {
-      ...user,
-      coins: user.coins - upgradeCost,
-      upgrades: {
-        ...user.upgrades,
-        treeLevel: nextLevel,
-      },
-    };
-
-    setUser(updatedUser);
-    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
-
-    const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
-    users[user.username] = updatedUser;
-    localStorage.setItem("casinoUsers", JSON.stringify(users));
-
-    const transaction = {
-      type: "upgrade",
-      amount: -upgradeCost,
-      timestamp: Date.now(),
-      description: `Upgraded tree to level ${nextLevel}`,
-    };
-
-    const transactions = JSON.parse(
-      localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
-    );
-    transactions.unshift(transaction);
-    localStorage.setItem(
-      `tree_transactions_${user.username}`,
-      JSON.stringify(transactions.slice(0, 50)),
-    );
-
-    toast({
-      title: "Tree Upgraded!",
-      description: `Your tree is now level ${nextLevel}!`,
-    });
   };
 
   return (

@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { getUserTransactions } from "@/lib/database";
 
 interface Transaction {
   type: 'bet' | 'win' | 'refund' | 'conversion';
   game?: string;
   amount: number;
-  coinsAmount?: number;
-  chipsAmount?: number;
+  coins_amount?: number;
+  chips_amount?: number;
   description: string;
-  timestamp: string;
+  created_at: string;
 }
 
 interface TransactionHistoryProps {
@@ -21,20 +22,19 @@ const TransactionHistory = ({ user }: TransactionHistoryProps) => {
   const [filter, setFilter] = useState<'all' | 'casino' | 'conversion'>('all');
 
   useEffect(() => {
-    if (user) {
-      // Get conversion transactions
-      const conversionTx = JSON.parse(localStorage.getItem(`transactions_${user.username}`) || '[]');
+    const loadTransactions = async () => {
+      if (user) {
+        try {
+          const dbTransactions = await getUserTransactions(user.id);
+          setTransactions(dbTransactions);
+        } catch (error) {
+          console.error('Error loading transactions:', error);
+          setTransactions([]);
+        }
+      }
+    };
 
-      // Get casino transactions
-      const casinoTx = JSON.parse(localStorage.getItem(`casino_transactions_${user.username}`) || '[]');
-
-      // Combine and sort by timestamp
-      const allTransactions = [...conversionTx, ...casinoTx].sort(
-        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-
-      setTransactions(allTransactions);
-    }
+    loadTransactions();
   }, [user]);
 
   const filteredTransactions = transactions.filter(tx => {
@@ -70,7 +70,7 @@ const TransactionHistory = ({ user }: TransactionHistoryProps) => {
 
     const totalConversions = transactions
       .filter(tx => tx.type === 'conversion')
-      .reduce((sum, tx) => sum + (tx.chipsAmount || 0), 0);
+      .reduce((sum, tx) => sum + (tx.chips_amount || 0), 0);
 
     return {
       totalBets: Math.round(totalBets * 100) / 100,
@@ -162,15 +162,15 @@ const TransactionHistory = ({ user }: TransactionHistoryProps) => {
                       {transaction.description}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {new Date(transaction.timestamp).toLocaleString()}
+                      {new Date(transaction.created_at).toLocaleString()}
                     </p>
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0 ml-2">
                   {transaction.type === 'conversion' ? (
                     <div>
-                      <p className="text-xs text-red-600">-{transaction.coinsAmount?.toFixed(2)} ₵</p>
-                      <p className="text-xs text-green-600">+{transaction.chipsAmount?.toFixed(2)} chips</p>
+                      <p className="text-xs text-red-600">-{transaction.coins_amount?.toFixed(2)} ₵</p>
+                      <p className="text-xs text-green-600">+{transaction.chips_amount?.toFixed(2)} chips</p>
                     </div>
                   ) : (
                     <p className={`font-bold text-sm ${getTransactionColor(transaction)}`}>
