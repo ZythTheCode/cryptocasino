@@ -25,7 +25,7 @@ const TopUpPage = () => {
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
         setUser(parsedUser);
-        
+
         // Sync with Supabase to get latest data
         try {
           const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
@@ -40,7 +40,7 @@ const TopUpPage = () => {
         }, 100);
       }
     };
-    
+
     loadUserData();
   }, []);
 
@@ -76,7 +76,7 @@ const TopUpPage = () => {
       const reader = new FileReader();
       reader.onload = async (e) => {
         const receiptData = e.target?.result as string;
-        
+
         const topUpRequestData = {
           user_id: user.id,
           username: user.username,
@@ -91,7 +91,7 @@ const TopUpPage = () => {
 
         // Save to database
         const success = await createTopupRequest(topUpRequestData);
-        
+
         if (success) {
           toast({
             title: "Top-up Request Submitted",
@@ -108,7 +108,7 @@ const TopUpPage = () => {
           throw new Error('Failed to save top-up request');
         }
       };
-      
+
       reader.readAsDataURL(receipt);
     } catch (error) {
       console.error('Error submitting top-up request:', error);

@@ -30,7 +30,15 @@ const WithdrawPage = () => {
           localStorage.setItem('casinoUser', JSON.stringify(freshUser));
           setUser(freshUser);
         } catch (error) {
-          console.log('Using localStorage data, Supabase sync failed');
+          console.log('Using localStorage data, Supabase sync failed:', error);
+          // Ensure user has required fields
+          const userWithDefaults = {
+            ...parsedUser,
+            coins: parsedUser.coins || 0,
+            chips: parsedUser.chips || 0,
+            isAdmin: parsedUser.isAdmin || parsedUser.is_admin || false
+          };
+          setUser(userWithDefaults);
         }
       } else {
         setTimeout(() => {

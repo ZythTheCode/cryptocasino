@@ -95,6 +95,25 @@ const TreePage = () => {
             ...userData,
             coins: userData.coins || 0,
             chips: userData.chips || 0,
+            isAdmin: userData.isAdmin || userData.is_admin || false
+          };
+          setUser(userWithDefaults);
+          localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
+          
+          // Try to load tree upgrade from localStorage as fallback
+          const savedTreeUpgrade = localStorage.getItem(`tree_${userData.username}`);
+          if (savedTreeUpgrade) {
+            const treeData = JSON.parse(savedTreeUpgrade);
+            setTreeUpgrade({
+              id: userData.id,
+              user_id: userData.id,
+              tree_level: treeData.treeLevel || 1,
+              last_claim: treeData.lastClaim || new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          }
+        }ata.chips || 0,
             upgrades: userData.upgrades || { treeLevel: 1 },
             activeBoosters: userData.activeBoosters || []
           };

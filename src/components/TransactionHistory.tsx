@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { DollarSign } from "lucide-react";
 import { getUserTransactions } from "@/lib/database";
 
 interface Transaction {
@@ -23,10 +23,15 @@ const TransactionHistory = ({ user }: TransactionHistoryProps) => {
 
   useEffect(() => {
     const loadTransactions = async () => {
-      if (user) {
+      if (user?.id) {
         try {
-          const dbTransactions = await getUserTransactions(user.id);
-          setTransactions(dbTransactions);
+          const dbTransactions = await getUserTransactions(user.id, 50);
+          const formattedTransactions = dbTransactions.map((tx: any) => ({
+            ...tx,
+            timestamp: new Date(tx.created_at).getTime(),
+            description: tx.description || `${tx.type} transaction`
+          }));
+          setTransactions(formattedTransactions);
         } catch (error) {
           console.error('Error loading transactions:', error);
           setTransactions([]);

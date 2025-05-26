@@ -1,4 +1,3 @@
-
 import { supabase } from './supabase'
 import type { User, Transaction, TopupRequest, WithdrawalRequest, TreeUpgrade } from './supabase'
 
@@ -24,7 +23,7 @@ export async function signUp(username: string, password: string) {
 
 export async function signIn(username: string, password: string) {
   console.log('Attempting to sign in user:', username);
-  
+
   const { data, error } = await supabase
     .from('users')
     .select('*')
@@ -64,14 +63,43 @@ export async function getAllUsers() {
     .select('*')
     .order('created_at', { ascending: false })
 
-  if (error) throw error
-  return data
+  if (error) {
+    console.error('Error fetching users:', error)
+    throw error
+  }
+  return data || []
 }
 
 export async function makeUserAdmin(userId: string) {
   const { data, error } = await supabase
     .from('users')
     .update({ is_admin: true })
+    .eq('id', userId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function getUserById(userId: string) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', userId)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function updateUserInfo(userId: string, updates: Partial<User>) {
+  // Prevent updating admin status through this function
+  const { is_admin, ...safeUpdates } = updates;
+
+  const { data, error } = await supabase
+    .from('users')
+    .update(safeUpdates)
     .eq('id', userId)
     .select()
     .single()
@@ -121,6 +149,19 @@ export async function addUserBalance(userId: string, coinsToAdd: number, chipsTo
 }
 
 export async function banUser(userId: string) {
+  // First check if user is admin
+  const { data: user, error: getUserError } = await supabase
+    .from('users')
+    .select('is_admin')
+    .eq('id', userId)
+    .single()
+
+  if (getUserError) throw getUserError
+
+  if (user.is_admin) {
+    throw new Error('Cannot ban admin users')
+  }
+
   const { data, error } = await supabase
     .from('users')
     .update({ is_banned: true })
@@ -145,6 +186,25 @@ export async function unbanUser(userId: string) {
 }
 
 export async function deleteUser(userId: string) {
+  // First check if user is admin
+  const { data: user, error: getUserError } = await supabase
+    .from('users')
+    .select('is_admin')
+    .eq('id', userId)
+    .single()
+
+  if (getUserError) throw getUserError
+
+  if (user.is_admin) {
+    throw new Error('Cannot delete admin users')
+  }
+
+  // Delete related data first
+  await supabase.from('transactions').delete().eq('user_id', userId)
+  await supabase.from('tree_upgrades').delete().eq('user_id', userId)
+  await supabase.from('topup_requests').delete().eq('user_id', userId)
+  await supabase.from('withdrawal_requests').delete().eq('user_id', userId)
+
   const { error } = await supabase
     .from('users')
     .delete()
@@ -203,14 +263,36 @@ export async function updateTreeUpgrade(userId: string, updates: Partial<TreeUpg
 
 // Transaction functions
 export async function addTransaction(transaction: Omit<Transaction, 'id' | 'created_at'>) {
-  const { data, error } = await supabase
-    .from('transactions')
-    .insert([transaction])
-    .select()
-    .single()
+  try {
+    console.log('Adding transaction:', transaction);
 
-  if (error) throw error
-  return data
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert([{
+        user_id: transaction.user_id,
+        type: transaction.type,
+        game: transaction.game || null,
+        amount: transaction.amount || null,
+        coins_amount: transaction.coins_amount || null,
+        chips_amount: transaction.chips_amount || null,
+        description: transaction.description,
+        php_amount: transaction.php_amount || null,
+        reference: transaction.reference || null
+      }])
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error adding transaction:', error);
+      throw error;
+    }
+
+    console.log('Transaction added successfully:', data);
+    return data;
+  } catch (error) {
+    console.error('Failed to add transaction:', error);
+    throw error;
+  }
 }
 
 export async function getUserTransactions(userId: string, limit = 100) {
@@ -235,9 +317,14 @@ export async function getAllTransactions(limit = 100) {
     .order('created_at', { ascending: false })
     .limit(limit)
 
-  if (error) throw error
+  if (error) {
+    console.error('Error fetching transactions:', error)
+    throw error
+  }
   return data || []
 }
+
+
 
 // Top-up functions
 export async function createTopupRequest(request: any) {
@@ -276,8 +363,18 @@ export async function getPendingTopupRequests() {
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
 
-  if (error) throw error
-  return data || []
+  if (error) {
+    console.error('Error fetching pending topup requests:', error)
+    throw error
+  }
+
+  // Process the data to flatten user information
+  const processedData = data?.map(request => ({
+    ...request,
+    username: request.users?.username || request.username
+  })) || []
+
+  return processedData
 }
 
 export async function updateTopupRequestStatus(
@@ -327,16 +424,28 @@ export async function getUserWithdrawals(userId: string) {
 export async function uploadReceipt(file: File, topupId: string) {
   const fileExt = file.name.split('.').pop()
   const fileName = `${topupId}.${fileExt}`
-  
+
   const { data, error } = await supabase.storage
     .from('receipts')
     .upload(fileName, file)
 
   if (error) throw error
-  
+
   const { data: publicUrlData } = supabase.storage
     .from('receipts')
     .getPublicUrl(fileName)
 
   return publicUrlData.publicUrl
+}
+
+export interface User {
+  id: string
+  username: string
+  password_hash: string
+  is_admin: boolean
+  is_banned: boolean
+  coins: number
+  chips: number
+  created_at: string
+  updated_at: string
 }

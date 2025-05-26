@@ -74,8 +74,9 @@ const CasinoPage = () => {
     }
   };
 
-  const addTransaction = async (transaction: any) => {
+  const addTransactionRecord = async (transaction: any) => {
     try {
+      const { addTransaction } = await import('@/lib/database');
       await addTransaction({
         user_id: user.id,
         type: transaction.type,
@@ -152,28 +153,28 @@ const CasinoPage = () => {
               <ColorGame 
                 user={user} 
                 onUpdateUser={updateUser} 
-                onAddTransaction={addTransaction} 
+                onAddTransaction={addTransactionRecord} 
               />
             )}
             {selectedGame === 'slots' && (
               <SlotMachine 
                 user={user} 
                 onUpdateUser={updateUser} 
-                onAddTransaction={addTransaction} 
+                onAddTransaction={addTransactionRecord} 
               />
             )}
             {selectedGame === 'blackjack' && (
               <Blackjack 
                 user={user} 
                 onUpdateUser={updateUser} 
-                onAddTransaction={addTransaction} 
+                onAddTransaction={addTransactionRecord} 
               />
             )}
             {selectedGame === 'baccarat' && (
-              <Baccarat user={user} onUpdateUser={updateUser} onAddTransaction={addTransaction} />
+              <Baccarat user={user} onUpdateUser={updateUser} onAddTransaction={addTransactionRecord} />
             )}
             {selectedGame === 'minebomb' && (
-              <Minebomb user={user} onUpdateUser={updateUser} onAddTransaction={addTransaction} />
+              <Minebomb user={user} onUpdateUser={updateUser} onAddTransaction={addTransactionRecord} />
             )}
             {selectedGame === 'roulette' && (
               <ComingSoonGame name="Roulette" icon="🔴" description="Red, black, or green" />
@@ -376,14 +377,12 @@ const AdminPanel = () => {
       setAllUsers(users);
     } catch (error) {
       console.error('Error loading users:', error);
-      // Fallback to localStorage
-      const savedUsers = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-      const usersArray = Object.entries(savedUsers).map(([username, userData]: [string, any]) => ({
-        id: userData.id || username,
-        username,
-        ...userData
-      }));
-      setAllUsers(usersArray);
+      toast({
+        title: "Error",
+        description: "Failed to load users from database",
+        variant: "destructive",
+      });
+      setAllUsers([]);
     }
   };
 
@@ -628,12 +627,58 @@ const AdminPanel = () => {
 
 const TransactionHistory = ({ user }: any) => {
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
-      const savedTransactions = localStorage.getItem(`casino_transactions_${user.username}`);
-      setTransactions(savedTransactions ? JSON.parse(savedTransactions) : []);
-    }
+    const loadTransactions = async () => {
+      if (user?.id) {
+        try {
+          setIsLoading(true);
+          const { getUserTransactions } = await import('@/lib/database');
+          const dbTransactions = await getUserTransactions(user.id, 50);
+          
+          // Format transactions for display
+          const formattedTransactions = dbTransactions.map((tx: any) => ({
+            ...tx,
+            timestamp: new Date(tx.created_at).getTime(),
+            description: tx.description || `${tx.type} transaction`
+          }));
+          
+          setTransactions(formattedTransactions);
+        } catch (error) {
+          console.error('Error loading transactions from Supabase:', error);
+          toast({
+            title: "Warning",
+            description: "Failed to load transaction history",
+            variant: "destructive",
+          });
+          setTransactions([]);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadTransactions();
+    
+    // Set up real-time subscription for user transactions
+    const { supabase } = require('@/lib/supabase');
+    const subscription = supabase
+      .channel(`user_transactions_${user?.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'transactions',
+        filter: `user_id=eq.${user?.id}`
+      }, (payload) => {
+        console.log('Transaction change detected for user:', payload);
+        loadTransactions(); // Reload transactions when changes occur
+      })
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [user]);
 
   return (
@@ -646,29 +691,47 @@ const TransactionHistory = ({ user }: any) => {
       </CardHeader>
       <CardContent>
         <div className="space-y-2 max-h-60 overflow-y-auto">
-          {transactions.slice(0, 50).map((transaction, index) => (
-            <div
-              key={index}
-              className="p-2 bg-white rounded border text-sm flex justify-between items-center"
-            >
-              <div className="flex-1">
-                <p className="font-medium">{transaction.description}</p>
-                <p className="text-xs text-gray-500">
-                  {new Date(transaction.timestamp).toLocaleString()}
-                </p>
-              </div>
-              <div
-                className={`font-bold ${transaction.amount >= 0 ? "text-green-600" : "text-red-600"}`}
-              >
-                {transaction.amount >= 0 ? "+" : ""}
-                {transaction.amount} Chips
-              </div>
+          {isLoading ? (
+            <div className="text-center py-4">
+              <span className="text-gray-500 text-sm">Loading transactions...</span>
             </div>
-          ))}
-          {transactions.length === 0 && (
-            <p className="text-center text-gray-500 text-sm py-4">
-              No transactions yet
-            </p>
+          ) : (
+            <>
+              {transactions.slice(0, 50).map((transaction, index) => (
+                <div
+                  key={`${transaction.id || index}-${transaction.timestamp}`}
+                  className="p-2 bg-white rounded border text-sm flex justify-between items-center"
+                >
+                  <div className="flex-1">
+                    <p className="font-medium">
+                      {transaction.game && `${transaction.game} - `}
+                      {transaction.description}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {new Date(transaction.created_at || transaction.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    {transaction.type === 'conversion' ? (
+                      <div>
+                        <p className="text-xs text-red-600">-{(transaction.coins_amount || 0).toFixed(2)} ₵</p>
+                        <p className="text-xs text-green-600">+{(transaction.chips_amount || 0).toFixed(2)} chips</p>
+                      </div>
+                    ) : (
+                      <div className={`font-bold ${(transaction.amount || 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {(transaction.amount || 0) >= 0 ? "+" : ""}
+                        {(transaction.amount || 0).toFixed(2)} Chips
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {transactions.length === 0 && (
+                <p className="text-center text-gray-500 text-sm py-4">
+                  No transactions yet
+                </p>
+              )}
+            </>
           )}
         </div>
       </CardContent>
