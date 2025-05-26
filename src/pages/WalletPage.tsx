@@ -26,8 +26,8 @@ const WalletPage = () => {
   const handleConvert = () => {
     if (!user || convertAmount > user.coins) {
       toast({
-        title: "Insufficient coins",
-        description: "You don't have enough coins to convert",
+        title: "Insufficient ₵checkels",
+        description: "You don't have enough ₵checkels to convert",
         variant: "destructive",
       });
       return;
@@ -55,7 +55,7 @@ const WalletPage = () => {
 
     toast({
       title: "Conversion successful!",
-      description: `Converted ${convertAmount} coins to ${convertAmount * 10} chips`,
+      description: `Converted ${convertAmount} ₵checkels to ${convertAmount * 10} chips`,
     });
   };
 
@@ -67,9 +67,10 @@ const WalletPage = () => {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
             <Wallet className="w-8 h-8 text-purple-400" />
-            <span>Wallet Management</span>
+            <span>₵checkel Wallet</span>
           </h1>
           <div className="flex items-center space-x-4">
+            <span className="text-white">Welcome, {user?.username}</span>
             <Link to="/">
               <Button variant="outline" size="sm" className="flex items-center space-x-2">
                 <Home className="w-4 h-4" />
@@ -101,7 +102,7 @@ const WalletPage = () => {
             <CardContent>
               <div className="grid grid-cols-2 gap-4 p-3 bg-white rounded border">
                 <div className="text-center">
-                  <p className="text-sm text-gray-600">Available Coins</p>
+                  <p className="text-sm text-gray-600">Available ₵checkels</p>
                   <p className="font-bold text-lg text-yellow-600">{user.coins}</p>
                 </div>
                 <div className="text-center">
@@ -114,11 +115,11 @@ const WalletPage = () => {
 
           <Card className="bg-purple-50 border-purple-200">
             <CardHeader>
-              <CardTitle className="text-purple-700">Convert Coins to Chips</CardTitle>
+              <CardTitle className="text-purple-700">Convert ₵checkels to Chips</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="p-3 bg-white rounded border">
-                <p className="font-bold text-lg text-center">1 Coin = 10 Casino Chips</p>
+                <p className="font-bold text-lg text-center">1 ₵checkel = 10 Casino Chips</p>
                 <div className="mt-3">
                   <label className="block text-sm font-medium mb-1">Convert Amount:</label>
                   <input
@@ -146,7 +147,7 @@ const WalletPage = () => {
                 {transactions.map((tx, index) => (
                   <div key={index} className="p-2 bg-white rounded border text-sm">
                     <div className="flex justify-between">
-                      <span>Converted {tx.coinsAmount} coins</span>
+                      <span>Converted {tx.coinsAmount} ₵checkels</span>
                       <span className="text-green-600">+{tx.chipsAmount} chips</span>
                     </div>
                     <div className="text-xs text-gray-500">

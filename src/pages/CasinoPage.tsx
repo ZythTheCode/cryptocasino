@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Gamepad2, Wallet, TreePine, Home, Settings } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 
 const CasinoPage = () => {
   const [user, setUser] = useState<any>(null);
@@ -61,6 +62,7 @@ const CasinoHeader = ({ user }: any) => {
             <span>{user?.chips || 0} Chips</span>
           </div>
           <div className="flex items-center space-x-4">
+            <span className="text-white">Welcome, {user?.username}</span>
             <Link to="/">
               <Button variant="outline" size="sm" className="flex items-center space-x-2">
                 <Home className="w-4 h-4" />
@@ -103,7 +105,7 @@ const ChipsWallet = ({ user }: any) => {
             <p className="text-gray-600">Ready to play!</p>
             <Link to="/tree">
               <Button variant="outline" className="w-full mt-4">
-                Get More Chips from Tree
+                Get More ₵ Checkels from Tree
               </Button>
             </Link>
           </div>
@@ -156,6 +158,178 @@ const GamesGrid = () => {
 };
 
 const AdminPanel = () => {
+  const [showPanel, setShowPanel] = useState(false);
+  const [users, setUsers] = useState<any>({});
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (showPanel) {
+      const savedUsers = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
+      setUsers(savedUsers);
+    }
+  }, [showPanel]);
+
+  const handleAddChips = (username: string, amount: number) => {
+    const updatedUsers = { ...users };
+    updatedUsers[username].chips = (updatedUsers[username].chips || 0) + amount;
+    
+    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+    setUsers(updatedUsers);
+    
+    // Update current user if it's the same user
+    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
+    if (currentUser.username === username) {
+      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
+    }
+    
+    toast({
+      title: "Chips Added",
+      description: `Added ${amount} chips to ${username}`,
+    });
+  };
+
+  const handleResetChips = (username: string) => {
+    const updatedUsers = { ...users };
+    updatedUsers[username].chips = 0;
+    
+    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+    setUsers(updatedUsers);
+    
+    // Update current user if it's the same user
+    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
+    if (currentUser.username === username) {
+      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
+    }
+    
+    // Clear conversion transactions
+    localStorage.removeItem(`transactions_${username}`);
+    
+    toast({
+      title: "Chips Reset",
+      description: `${username}'s chips have been reset to 0`,
+    });
+  };
+
+  const getCasinoStats = () => {
+    const userList = Object.values(users);
+    return {
+      totalChips: userList.reduce((sum: number, user: any) => sum + (user.chips || 0), 0),
+      averageChips: userList.length > 0 ? 
+        userList.reduce((sum: number, user: any) => sum + (user.chips || 0), 0) / userList.length : 0,
+      richestPlayer: userList.reduce((max: any, user: any) => 
+        (user.chips || 0) > (max.chips || 0) ? user : max, { chips: 0, username: 'None' }
+      )
+    };
+  };
+
+  if (showPanel) {
+    const stats = getCasinoStats();
+    return (
+      <Card className="border-red-200 bg-red-50 lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between text-red-600">
+            <span className="flex items-center space-x-2">
+              <Settings className="w-6 h-6" />
+              <span>Casino Admin Panel</span>
+            </span>
+            <Button variant="outline" size="sm" onClick={() => setShowPanel(false)}>
+              Close
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="text-center p-4 bg-white rounded border">
+              <h3 className="font-bold text-2xl text-green-600">{stats.totalChips.toFixed(0)}</h3>
+              <p className="text-sm text-gray-600">Total Chips in Economy</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded border">
+              <h3 className="font-bold text-2xl text-blue-600">{stats.averageChips.toFixed(0)}</h3>
+              <p className="text-sm text-gray-600">Average Chips per User</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded border">
+              <h3 className="font-bold text-lg text-purple-600">{stats.richestPlayer.username}</h3>
+              <p className="text-sm text-gray-600">Richest Player ({stats.richestPlayer.chips} chips)</p>
+            </div>
+          </div>
+
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {Object.entries(users).map(([username, userData]: [string, any]) => (
+              <div key={username} className="p-4 bg-white rounded border">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <h3 className="font-bold text-lg">
+                      {username} {userData.isAdmin && <span className="text-red-500 text-sm">(Admin)</span>}
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                      <div>Casino Chips: <span className="font-medium text-green-600">{userData.chips || 0}</span></div>
+                      <div>Total ₵ Checkels: <span className="font-medium text-yellow-600">{userData.coins || 0}</span></div>
+                    </div>
+                    <div className="mt-2">
+                      <p className="text-xs text-gray-600">
+                        Conversions: {JSON.parse(localStorage.getItem(`transactions_${username}`) || '[]').length} total
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col space-y-2 ml-4">
+                    <Button size="sm" variant="outline" onClick={() => handleAddChips(username, 100)}>
+                      +100 Chips
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleAddChips(username, 1000)}>
+                      +1000 Chips
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={() => handleResetChips(username)}>
+                      Reset Chips
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 bg-white p-4 rounded border">
+            <h3 className="font-bold mb-3">Casino Controls</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  // Clear all conversion transactions
+                  Object.keys(users).forEach(username => {
+                    localStorage.removeItem(`transactions_${username}`);
+                  });
+                  toast({
+                    title: "Transactions Cleared",
+                    description: "All conversion histories cleared",
+                  });
+                }}
+              >
+                Clear All Conversions
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  // Reset all chips to 0
+                  const updatedUsers = { ...users };
+                  Object.keys(updatedUsers).forEach(username => {
+                    updatedUsers[username].chips = 0;
+                  });
+                  localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+                  setUsers(updatedUsers);
+                  toast({
+                    title: "Economy Reset",
+                    description: "All user chips reset to 0",
+                  });
+                }}
+              >
+                Reset All Chips
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-red-200 bg-red-50">
       <CardHeader>
@@ -166,14 +340,8 @@ const AdminPanel = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
-            View All Users
-          </Button>
-          <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
-            Game Logs
-          </Button>
-          <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
-            Manage Balances
+          <Button variant="outline" className="w-full" onClick={() => setShowPanel(true)}>
+            Open Casino Admin
           </Button>
         </div>
       </CardContent>

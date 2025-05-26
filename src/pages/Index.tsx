@@ -5,6 +5,13 @@ import { Coins, TreePine, Gamepad2, Settings, Wallet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
 
+// Import calculateTreeLevel function for admin features
+const calculateTreeLevel = (upgrades: any) => {
+  if (!upgrades) return 1;
+  const tier = upgrades.tier || 1;
+  return tier; // Tree level directly matches the tier
+};
+
 const Index = () => {
   const [user, setUser] = useState<any>(null);
   const [showLogin, setShowLogin] = useState(true);
@@ -43,7 +50,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: any) => void }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!username || !password) {
       toast({
         title: "Error",
@@ -54,7 +61,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: any) => void }) => {
     }
 
     const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-    
+
     if (isRegister) {
       if (users[username]) {
         toast({
@@ -64,21 +71,22 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: any) => void }) => {
         });
         return;
       }
-      
+
       const newUser = {
         username,
         password, // In real app, this would be hashed
-        coins: 100, // Starting coins
-        chips: 0,
+        coins: username === 'admin' ? 10000 : 100, // More coins for admin
+        chips: username === 'admin' ? 1000 : 0,
         lastLogin: Date.now(),
         isAdmin: username === 'admin',
-        treeLastClaim: Date.now()
+        treeLastClaim: Date.now(),
+        upgrades: {}
       };
-      
+
       users[username] = newUser;
       localStorage.setItem('casinoUsers', JSON.stringify(users));
       onLogin(newUser);
-      
+
       toast({
         title: "Success",
         description: "Account created successfully!",
@@ -93,17 +101,17 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: any) => void }) => {
         });
         return;
       }
-      
+
       // Calculate offline coins
       const timeDiff = Date.now() - user.lastLogin;
       const offlineCoins = Math.floor(timeDiff / (10 * 60 * 1000)); // 1 coin per 10 minutes
       user.coins += offlineCoins;
       user.lastLogin = Date.now();
-      
+
       users[username] = user;
       localStorage.setItem('casinoUsers', JSON.stringify(users));
       onLogin(user);
-      
+
       if (offlineCoins > 0) {
         toast({
           title: "Welcome back!",
@@ -175,7 +183,7 @@ const Header = ({ user, setUser, setShowLogin }: any) => {
         <div className="flex items-center space-x-6 text-white">
           <div className="flex items-center space-x-2">
             <Coins className="w-5 h-5 text-yellow-400" />
-            <span>{user?.coins || 0} Coins</span>
+            <span>{user?.coins || 0} ₵checkels</span>
           </div>
           <div className="flex items-center space-x-2">
             <Wallet className="w-5 h-5 text-green-400" />
@@ -214,7 +222,7 @@ const QuickStats = ({ user }: any) => {
           <div className="flex justify-between items-center">
             <span className="flex items-center space-x-2">
               <Coins className="w-4 h-4 text-yellow-600" />
-              <span>Coins</span>
+              <span>₵checkels</span>
             </span>
             <span className="font-bold text-yellow-600">{user?.coins || 0}</span>
           </div>
@@ -254,7 +262,7 @@ const NavigationCard = () => {
               </CardContent>
             </Card>
           </Link>
-          
+
           <Link to="/casino">
             <Card className="hover:bg-purple-50 transition-colors cursor-pointer">
               <CardContent className="p-6 text-center">
@@ -287,6 +295,285 @@ const NavigationCard = () => {
 };
 
 const AdminQuickAccess = () => {
+  const [showUserManager, setShowUserManager] = useState(false);
+  const [showReports, setShowReports] = useState(false);
+  const [users, setUsers] = useState<any>({});
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const savedUsers = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
+    setUsers(savedUsers);
+  }, [showUserManager, showReports]);
+
+  const handleAddCoins = (username: string, amount: number) => {
+    const updatedUsers = { ...users };
+    updatedUsers[username].coins += amount;
+
+    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+    setUsers(updatedUsers);
+
+    // Update current user if it's the same user
+    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
+    if (currentUser.username === username) {
+      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
+    }
+
+    toast({
+      title: "Coins Added",
+      description: `Added ${amount} coins to ${username}`,
+    });
+  };
+
+  const handleResetUser = (username: string) => {
+    const updatedUsers = { ...users };
+    updatedUsers[username] = {
+      ...updatedUsers[username],
+      coins: 100,
+      chips: 0,
+      upgrades: {},
+      activeBoosters: [],
+      upgradeResetTime: null
+    };
+
+    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+    setUsers(updatedUsers);
+
+    // Clear user transactions
+    localStorage.removeItem(`tree_transactions_${username}`);
+    localStorage.removeItem(`transactions_${username}`);
+
+    // Update current user if it's the same user
+    const currentUser = JSON.parse(localStorage.getItem('casinoUser') || '{}');
+    if (currentUser.username === username) {
+      localStorage.setItem('casinoUser', JSON.stringify(updatedUsers[username]));
+    }
+
+    toast({
+      title: "User Reset",
+      description: `${username} has been reset to default state`,
+    });
+  };
+
+  const handleDeleteUser = (username: string) => {
+    if (username === 'admin') {
+      toast({
+        title: "Cannot Delete",
+        description: "Cannot delete admin account",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const updatedUsers = { ...users };
+    delete updatedUsers[username];
+
+    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+    setUsers(updatedUsers);
+
+    // Clear user transactions
+    localStorage.removeItem(`tree_transactions_${username}`);
+    localStorage.removeItem(`transactions_${username}`);
+
+    toast({
+      title: "User Deleted",
+      description: `${username} has been deleted`,
+    });
+  };
+
+  const getTotalStats = () => {
+    const userList = Object.values(users);
+    return {
+      totalUsers: userList.length,
+      totalCoins: userList.reduce((sum: number, user: any) => sum + (user.coins || 0), 0),
+      totalChips: userList.reduce((sum: number, user: any) => sum + (user.chips || 0), 0),
+      activeUsers: userList.filter((user: any) => 
+        user.lastLogin && Date.now() - user.lastLogin < 24 * 60 * 60 * 1000
+      ).length
+    };
+  };
+
+  if (showUserManager) {
+    return (
+      <Card className="border-red-200 bg-red-50 lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between text-red-600">
+            <span className="flex items-center space-x-2">
+              <Settings className="w-6 h-6" />
+              <span>User Management</span>
+            </span>
+            <Button variant="outline" size="sm" onClick={() => setShowUserManager(false)}>
+              Close
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {Object.entries(users).map(([username, userData]: [string, any]) => (
+              <div key={username} className="p-4 bg-white rounded border">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <h3 className="font-bold text-lg">
+                      {username} {userData.isAdmin && <span className="text-red-500 text-sm">(Admin)</span>}
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                      <div>Coins: <span className="font-medium text-green-600">{userData.coins || 0}</span></div>
+                      <div>Chips: <span className="font-medium text-blue-600">{userData.chips || 0}</span></div>
+                      <div>Level: <span className="font-medium">{calculateTreeLevel(userData.upgrades)}</span></div>
+                      <div>Last Login: <span className="font-medium">
+                        {userData.lastLogin ? new Date(userData.lastLogin).toLocaleDateString() : 'Never'}
+                      </span></div>
+                    </div>
+                    <div className="mt-2">
+                      <p className="text-xs text-gray-600">
+                        Upgrades: {Object.values(userData.upgrades || {}).filter(Boolean).length}/3
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        Active Boosters: {(userData.activeBoosters || []).filter((b: any) => Date.now() < b.endTime).length}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col space-y-2 ml-4">
+                    <Button size="sm" variant="outline" onClick={() => handleAddCoins(username, 1000)}>
+                      +1000 Coins
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleAddCoins(username, 10000)}>
+                      +10000 Coins
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={() => handleResetUser(username)}>
+                      Reset User
+                    </Button>
+                    {!userData.isAdmin && (
+                      <Button size="sm" variant="destructive" onClick={() => handleDeleteUser(username)}>
+                        Delete User
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (showReports) {
+    const stats = getTotalStats();
+    return (
+      <Card className="border-red-200 bg-red-50 lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between text-red-600">
+            <span className="flex items-center space-x-2">
+              <Settings className="w-6 h-6" />
+              <span>System Reports</span>
+            </span>
+            <Button variant="outline" size="sm" onClick={() => setShowReports(false)}>
+              Close
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="text-center p-4 bg-white rounded border">
+              <h3 className="font-bold text-2xl text-blue-600">{stats.totalUsers}</h3>
+              <p className="text-sm text-gray-600">Total Users</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded border">
+              <h3 className="font-bold text-2xl text-green-600">{stats.totalCoins.toFixed(0)}</h3>
+              <p className="text-sm text-gray-600">Total Coins</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded border">
+              <h3 className="font-bold text-2xl text-purple-600">{stats.totalChips.toFixed(0)}</h3>
+              <p className="text-sm text-gray-600">Total Chips</p>
+            </div>
+            <div className="text-center p-4 bg-white rounded border">
+              <h3 className="font-bold text-2xl text-orange-600">{stats.activeUsers}</h3>
+              <p className="text-sm text-gray-600">Active Users (24h)</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="bg-white p-4 rounded border">
+              <h3 className="font-bold mb-3">Top Users by Coins</h3>
+              <div className="space-y-2">
+                {Object.entries(users)
+                  .sort(([,a]: [string, any], [,b]: [string, any]) => (b.coins || 0) - (a.coins || 0))
+                  .slice(0, 5)
+                  .map(([username, userData]: [string, any], index) => (
+                    <div key={username} className="flex justify-between items-center text-sm">
+                      <span>#{index + 1} {username}</span>
+                      <span className="font-medium text-green-600">{userData.coins || 0} coins</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded border">
+              <h3 className="font-bold mb-3">User Activity Summary</h3>
+              <div className="space-y-2 text-sm">
+                {Object.entries(users).map(([username, userData]: [string, any]) => (
+                  <div key={username} className="flex justify-between items-center">
+                    <span>{username}</span>
+                    <div className="text-right">
+                      <div>Level {calculateTreeLevel(userData.upgrades)}</div>
+                      <div className="text-xs text-gray-500">
+                        {userData.lastLogin ? 
+                          `Active ${Math.floor((Date.now() - userData.lastLogin) / (1000 * 60 * 60 * 24))}d ago` : 
+                          'Never logged in'
+                        }
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded border">
+              <h3 className="font-bold mb-3">Economy Controls</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    // Clear all transactions
+                    Object.keys(users).forEach(username => {
+                      localStorage.removeItem(`tree_transactions_${username}`);
+                      localStorage.removeItem(`transactions_${username}`);
+                    });
+                    toast({
+                      title: "Economy Reset",
+                      description: "All transaction histories cleared",
+                    });
+                  }}
+                >
+                  Clear All Transactions
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    // Reset all user boosters
+                    const updatedUsers = { ...users };
+                    Object.keys(updatedUsers).forEach(username => {
+                      updatedUsers[username].activeBoosters = [];
+                      updatedUsers[username].upgradeResetTime = null;
+                    });
+                    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
+                    setUsers(updatedUsers);
+                    toast({
+                      title: "Boosters Reset",
+                      description: "All active boosters cleared",
+                    });
+                  }}
+                >
+                  Clear All Boosters
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-red-200 bg-red-50">
       <CardHeader>
@@ -297,10 +584,10 @@ const AdminQuickAccess = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
+          <Button variant="outline" className="w-full" onClick={() => setShowUserManager(true)}>
             Manage Users
           </Button>
-          <Button variant="outline" className="w-full" onClick={() => alert('Admin features coming soon!')}>
+          <Button variant="outline" className="w-full" onClick={() => setShowReports(true)}>
             View Reports
           </Button>
         </div>

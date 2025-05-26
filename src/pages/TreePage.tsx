@@ -1,31 +1,144 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { TreePine, Coins, Home, Gamepad2, Wallet } from "lucide-react";
+import {
+  TreePine,
+  Coins,
+  Home,
+  Gamepad2,
+  Wallet,
+  Zap,
+  Clock,
+  History,
+  TrendingUp,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
+
+const calculateTreeLevel = (upgrades: any) => {
+  if (!upgrades) return 1;
+  return upgrades.treeLevel || 1;
+};
+
+const calculateBaseCPS = (level: number) => {
+  return 0.00167 * Math.pow(1.1, level - 1);
+};
+
+const calculateBonusYield = (level: number) => {
+  return Math.floor(level * 0.5); // 0.5% per level
+};
+
+const calculateMaxGenerationTime = (level: number) => {
+  const baseTime = 1800; // 30 minutes base
+  const storageMultiplier = 1 + (level - 1) * 0.1; // 10% increase per level
+  return Math.floor(baseTime * storageMultiplier);
+};
+
+const calculateLevelUpCost = (currentLevel: number) => {
+  return Math.floor(100 * Math.pow(1.5, currentLevel - 1));
+};
+
+const getTreeImage = (level: number) => {
+  if (level >= 80) return "🌳"; // Ancient Tree
+  if (level >= 60) return "🌲"; // Mature Tree
+  if (level >= 40) return "🌱"; // Growing Tree
+  if (level >= 20) return "🪴"; // Young Tree
+  return "🌿"; // Seedling
+};
+
+const formatDuration = (seconds: number) => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  } else {
+    return `${minutes}m`;
+  }
+};
 
 const TreePage = () => {
   const [user, setUser] = useState<any>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
+    const savedUser = localStorage.getItem("casinoUser");
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const userData = JSON.parse(savedUser);
+
+      // Initialize tree level if not exists
+      if (!userData.upgrades?.treeLevel) {
+        userData.upgrades = {
+          ...userData.upgrades,
+          treeLevel: 1,
+        };
+      }
+
+      // Calculate offline earnings
+      const lastVisit = userData.treeLastVisit || Date.now();
+      const level = calculateTreeLevel(userData.upgrades);
+      const maxGenerationTime = calculateMaxGenerationTime(level);
+      const offlineTime = Math.min(
+        Date.now() - lastVisit,
+        maxGenerationTime * 1000,
+      );
+
+      if (offlineTime > 0) {
+        const baseCPS = calculateBaseCPS(level);
+        const offlineCoins = (offlineTime / 1000) * baseCPS;
+
+        if (offlineCoins > 0.001) {
+          userData.coins += offlineCoins;
+
+          const transaction = {
+            type: "offline",
+            amount: offlineCoins,
+            timestamp: Date.now(),
+            description: `Offline earnings (${Math.floor(offlineTime / 60000)} minutes)`,
+          };
+
+          const transactions = JSON.parse(
+            localStorage.getItem(`tree_transactions_${userData.username}`) ||
+              "[]",
+          );
+          transactions.unshift(transaction);
+          localStorage.setItem(
+            `tree_transactions_${userData.username}`,
+            JSON.stringify(transactions.slice(0, 50)),
+          );
+
+          localStorage.setItem("casinoUser", JSON.stringify(userData));
+          const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+          users[userData.username] = userData;
+          localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+          setTimeout(() => {
+            toast({
+              title: "Welcome back!",
+              description: `You earned ${offlineCoins.toFixed(3)} ₵ while offline!`,
+            });
+          }, 500);
+        }
+      }
+
+      userData.treeLastVisit = Date.now();
+      localStorage.setItem("casinoUser", JSON.stringify(userData));
+      const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+      users[userData.username] = userData;
+      localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+      setUser(userData);
     } else {
-      // Redirect to home if not logged in
-      window.location.href = '/';
+      window.location.href = "/";
     }
   }, []);
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-900 via-emerald-900 to-teal-900">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">
         <Card>
           <CardContent className="p-6">
-            <p>Please log in to access the Money Tree</p>
+            <p>Please log in to access the Tree</p>
             <Link to="/">
               <Button className="mt-4">Go to Login</Button>
             </Link>
@@ -36,199 +149,489 @@ const TreePage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-900 via-emerald-900 to-teal-900">
-      <TreeHeader user={user} />
-      <div className="max-w-4xl mx-auto p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <MoneyTreeCard user={user} setUser={setUser} />
-          <EarningsStats user={user} />
-          <TreeUpgrades user={user} setUser={setUser} />
-          <TreeBoosters user={user} setUser={setUser} />
-          <WalletCard user={user} />
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const TreeHeader = ({ user }: any) => {
-  return (
-    <header className="bg-black/20 backdrop-blur-sm p-4">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
-          <TreePine className="w-8 h-8 text-green-400" />
-          <span>Money Tree Farm</span>
-        </h1>
-        <div className="flex items-center space-x-6 text-white">
-          <div className="flex items-center space-x-2">
-            <Coins className="w-5 h-5 text-yellow-400" />
-            <span>{user?.coins || 0} Coins</span>
-          </div>
-          <div className="flex items-center space-x-4">
+    <div className="min-h-screen bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">
+      <header className="bg-black/20 backdrop-blur-sm p-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
+            <TreePine className="w-8 h-8 text-green-400" />
+            <span>Money Tree Farm</span>
+          </h1>
+          <div className="flex items-center space-x-6 text-white">
+            <div className="flex items-center space-x-2">
+              <Coins className="w-5 h-5 text-yellow-400" />
+              <span>{user?.coins?.toFixed(2) || "0.00"} ₵ Checkels</span>
+            </div>
+            <span className="text-white">Welcome, {user?.username}</span>
             <Link to="/">
-              <Button variant="outline" size="sm" className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center space-x-2"
+              >
                 <Home className="w-4 h-4" />
                 <span>Home</span>
               </Button>
             </Link>
             <Link to="/casino">
-              <Button variant="outline" size="sm" className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center space-x-2"
+              >
                 <Gamepad2 className="w-4 h-4" />
                 <span>Casino</span>
               </Button>
             </Link>
             <Link to="/wallet">
-              <Button variant="outline" size="sm" className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center space-x-2"
+              >
                 <Wallet className="w-4 h-4" />
                 <span>Wallet</span>
               </Button>
             </Link>
           </div>
         </div>
+      </header>
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <MoneyTreeCard user={user} setUser={setUser} />
+          <TreeLevelingCard user={user} setUser={setUser} />
+          <BoosterStore user={user} setUser={setUser} />
+          <TransactionHistory user={user} />
+        </div>
       </div>
-    </header>
+    </div>
   );
 };
 
 const MoneyTreeCard = ({ user, setUser }: any) => {
-  const [timeToNext, setTimeToNext] = useState('');
-  const [coinsAvailable, setCoinsAvailable] = useState(0);
   const { toast } = useToast();
-  const [activeBoosters, setActiveBoosters] = useState<{[key: string]: number}>(
-    JSON.parse(localStorage.getItem('activeBoosters') || '{}')
+  const [currentCheckels, setCurrentCheckels] = useState(0);
+  const [lastClaimTime, setLastClaimTime] = useState(Date.now());
+  const [generationActive, setGenerationActive] = useState(true);
+
+  const level = calculateTreeLevel(user?.upgrades);
+  const baseCPS = calculateBaseCPS(level);
+  const bonusYield = calculateBonusYield(level);
+  const maxGenerationTime = calculateMaxGenerationTime(level);
+
+  // Calculate total booster multiplier from active boosters
+  const activeBoosters = user?.activeBoosters || [];
+  const now = Date.now();
+  const validBoosters = activeBoosters.filter(
+    (booster: any) => now < booster.endTime,
   );
+  const totalMultiplier = validBoosters.reduce(
+    (total: number, booster: any) => total * booster.multiplier,
+    1,
+  );
+
+  const finalCPS = baseCPS * totalMultiplier;
+
+  useEffect(() => {
+    const savedGenerationState = localStorage.getItem(
+      `tree_generation_${user?.username}`,
+    );
+    if (savedGenerationState) {
+      const state = JSON.parse(savedGenerationState);
+      setCurrentCheckels(state.currentCheckels || 0);
+      setLastClaimTime(state.lastClaimTime || Date.now());
+      setGenerationActive(state.generationActive !== false);
+    }
+  }, [user?.username]);
+
+  const saveGenerationState = () => {
+    if (user?.username) {
+      const state = {
+        currentCheckels,
+        lastClaimTime,
+        generationActive,
+      };
+      localStorage.setItem(
+        `tree_generation_${user.username}`,
+        JSON.stringify(state),
+      );
+    }
+  };
 
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
-      const timeSinceLastClaim = now - (user?.treeLastClaim || now);
-      const baseInterval = user?.upgrades?.faster_growth ? 8 * 60 * 1000 : 10 * 60 * 1000;
-      
-      // Apply speed booster if active
-      let effectiveInterval = baseInterval;
-      if (activeBoosters['speed_boost'] && activeBoosters['speed_boost'] > now) {
-        effectiveInterval = baseInterval / 2;
+
+      const activeBoosters = user?.activeBoosters || [];
+      const validBoosters = activeBoosters.filter(
+        (booster: any) => now < booster.endTime,
+      );
+
+      if (validBoosters.length !== activeBoosters.length) {
+        const updatedUser = {
+          ...user,
+          activeBoosters: validBoosters,
+        };
+        setUser(updatedUser);
+        localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+        const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+        users[user.username] = updatedUser;
+        localStorage.setItem("casinoUsers", JSON.stringify(users));
       }
-      
-      const timeToNextCoin = effectiveInterval - (timeSinceLastClaim % effectiveInterval);
-      const coinsToCollect = Math.floor(timeSinceLastClaim / effectiveInterval);
-      
-      setCoinsAvailable(coinsToCollect);
-      const minutes = Math.floor(timeToNextCoin / 60000);
-      const seconds = Math.floor((timeToNextCoin % 60000) / 1000);
-      setTimeToNext(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+
+      const timeElapsed = (now - lastClaimTime) / 1000;
+
+      if (timeElapsed <= maxGenerationTime && generationActive) {
+        setCurrentCheckels((prev) => prev + finalCPS);
+      } else {
+        setGenerationActive(false);
+      }
+
+      saveGenerationState();
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [user, activeBoosters]);
+  }, [
+    lastClaimTime,
+    finalCPS,
+    maxGenerationTime,
+    user?.activeBoosters,
+    currentCheckels,
+    generationActive,
+    user,
+  ]);
 
-  const claimCoins = () => {
-    const now = Date.now();
-    const timeSinceLastClaim = now - (user?.treeLastClaim || 0);
-    const baseInterval = user?.upgrades?.faster_growth ? 8 * 60 * 1000 : 10 * 60 * 1000;
-    const maxStorage = (user?.upgrades?.storage_level || 1) * 10;
-    const coinsPerHarvest = (user?.upgrades?.tree_level || 1);
-    
-    let coinsToAdd = Math.floor(timeSinceLastClaim / baseInterval) * coinsPerHarvest;
-    
-    // Apply storage limit
-    coinsToAdd = Math.min(coinsToAdd, maxStorage);
-    
-    if (coinsToAdd === 0) {
+  useEffect(() => {
+    saveGenerationState();
+  }, [user?.upgrades, finalCPS, maxGenerationTime]);
+
+  const claimCheckels = () => {
+    if (currentCheckels === 0) {
       toast({
-        title: "No coins available",
-        description: "Wait for the next harvest or upgrade storage capacity!",
-        variant: "destructive"
+        title: "No Checkels to claim",
+        description: "Wait for Checkels to generate",
+        variant: "destructive",
       });
       return;
     }
 
-    // Apply active boosters
-    let totalMultiplier = 1;
-    Object.entries(activeBoosters).forEach(([id, endTime]: [string, any]) => {
-      if (endTime > now) {
-        switch(id) {
-          case 'double_coins': totalMultiplier *= 2; break;
-          case 'triple_coins': totalMultiplier *= 3; break;
-          case 'super_boost': totalMultiplier *= 5; break;
-        }
-      }
-    });
-    
-    coinsToAdd *= totalMultiplier;
-    
-    if (coinsToAdd > 0) {
-      const updatedUser = {
-        ...user,
-        coins: user.coins + coinsToAdd,
-        treeLastClaim: now
-      };
-      
-      setUser(updatedUser);
-      localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-      
-      const users = JSON.parse(localStorage.getItem('casinoUsers') || '{}');
-      users[user.username] = updatedUser;
-      localStorage.setItem('casinoUsers', JSON.stringify(users));
-      
-      toast({
-        title: "Coins Claimed!",
-        description: `You earned ${coinsToAdd} coins from your Money Tree!`,
-      });
-    } else {
-      toast({
-        title: "No coins ready",
-        description: "Wait for the next coin to be ready!",
-        variant: "destructive",
-      });
+    let finalCheckels = currentCheckels;
+
+    // Apply bonus yield
+    if (bonusYield > 0) {
+      finalCheckels *= 1 + (bonusYield / 100);
     }
+
+    const updatedUser = {
+      ...user,
+      coins: user.coins + finalCheckels,
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+    const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+    users[user.username] = updatedUser;
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+    const transaction = {
+      type: "claim",
+      amount: finalCheckels,
+      timestamp: Date.now(),
+      description: "Claimed Checkels from tree",
+    };
+
+    const transactions = JSON.parse(
+      localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
+    );
+    transactions.unshift(transaction);
+    localStorage.setItem(
+      `tree_transactions_${user.username}`,
+      JSON.stringify(transactions.slice(0, 50)),
+    );
+
+    updatedUser.treeLastVisit = Date.now();
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+    users[user.username] = updatedUser;
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+    const newClaimTime = Date.now();
+    setCurrentCheckels(0);
+    setLastClaimTime(newClaimTime);
+    setGenerationActive(true);
+
+    saveGenerationState();
+
+    toast({
+      title: "Checkels claimed!",
+      description: `You earned ${finalCheckels.toFixed(3)} ₵Checkels`,
+    });
   };
 
   return (
-    <Card className="bg-green-50 border-green-200 md:col-span-2">
+    <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2 text-green-700">
-          <TreePine className="w-8 h-8" />
-          <span>Your Money Tree</span>
+        <CardTitle className="flex items-center justify-between">
+          <span className="flex items-center space-x-2">
+            <span className="text-4xl">{getTreeImage(level)}</span>
+            <span className="text-green-700">Level {level} Tree</span>
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-center">
-          <div className="relative">
-            <div className="text-8xl mb-6">🌳</div>
-            <div className="absolute top-0 right-0 flex flex-col gap-1">
-              {Object.entries(activeBoosters).map(([id, endTime]) => {
-                if (endTime > Date.now()) {
-                  const timeLeft = Math.ceil((endTime - Date.now()) / 60000);
-                  return (
-                    <div key={id} className="bg-purple-600/80 text-white px-2 py-1 rounded text-sm">
-                      {id === 'double_coins' && '2x Coins'}
-                      {id === 'triple_coins' && '3x Coins'}
-                      {id === 'super_boost' && '5x Coins'}
-                      {id === 'speed_boost' && '2x Speed'}
-                      <span className="ml-2">{timeLeft}m</span>
-                    </div>
-                  );
-                }
-                return null;
-              })}
+        <div className="space-y-4">
+          <div className="text-center p-4 bg-white rounded-lg border">
+            <p className="text-2xl font-bold text-green-600">
+              ₵{currentCheckels.toFixed(3)}
+            </p>
+            <p className="text-sm text-gray-600">Current Checkels</p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-sm">
+            <div className="text-center p-2 bg-green-50 rounded">
+              <p className="font-medium">CPS</p>
+              <p className="text-green-600 font-bold">
+                {finalCPS.toFixed(5)}
+              </p>
+              {totalMultiplier > 1 && (
+                <p className="text-xs text-orange-600">
+                  {totalMultiplier.toFixed(1)}x Boost
+                </p>
+              )}
+            </div>
+            <div className="text-center p-2 bg-purple-50 rounded">
+              <p className="font-medium">Bonus Yield</p>
+              <p className="text-purple-600 font-bold">
+                +{bonusYield}%
+              </p>
+            </div>
+            <div className="text-center p-2 bg-blue-50 rounded">
+              <p className="font-medium">Max Duration</p>
+              <p className="text-blue-600 font-bold">
+                {formatDuration(maxGenerationTime)}
+              </p>
             </div>
           </div>
-          <div className="mb-6">
-            <p className="text-lg text-gray-600 mb-2">Next coin ready in:</p>
-            <p className="text-3xl font-bold text-green-600 mb-2">{timeToNext}</p>
-            <p className="text-sm text-gray-500">
-              1 coin every {user?.upgrades?.faster_growth ? '8' : '10'} minutes
-              {activeBoosters['speed_boost'] && activeBoosters['speed_boost'] > Date.now() && ' (2x Speed active!)'}
-            </p>
-          </div>
-          <Button 
-            onClick={claimCoins} 
-            size="lg" 
-            className="w-full"
-            disabled={coinsAvailable === 0}
+
+          {!generationActive && (
+            <div className="text-center text-red-600 text-sm">
+              No ₵Checkels generating – please claim to restart
+            </div>
+          )}
+
+          <Button
+            onClick={claimCheckels}
+            className="w-full bg-green-600 hover:bg-green-700"
           >
-            🪙 {coinsAvailable > 0 ? `Collect ${coinsAvailable} Coins` : 'No Coins Available'}
+            Claim ₵ Checkels
+          </Button>
+
+          {/* Generation Timer */}
+          <div className="text-center p-2 bg-blue-50 rounded">
+            <p className="text-sm font-medium text-blue-700">Generation Timer</p>
+            <p className="text-xs text-blue-600">
+              {formatDuration(Math.floor((Date.now() - lastClaimTime) / 1000))} / {formatDuration(maxGenerationTime)}
+            </p>
+            <div className="w-full bg-blue-200 rounded-full h-1.5 mt-1">
+              <div 
+                className="bg-blue-600 h-1.5 rounded-full transition-all duration-1000"
+                style={{ 
+                  width: `${Math.min(100, ((Date.now() - lastClaimTime) / 1000 / maxGenerationTime) * 100)}%` 
+                }}
+              ></div>
+            </div>
+          </div>
+
+          {/* Active Boosters Display */}
+          <div className="space-y-2">
+            <h4 className="font-medium text-sm">Active Boosters</h4>
+            {validBoosters.length > 0 ? (
+              <div className="space-y-2">
+                {validBoosters.map((booster: any, index: number) => {
+                  const timeLeft = Math.max(0, (booster.endTime - Date.now()) / 1000 / 60);
+                  const totalDuration = 30; // Assuming original duration, adjust based on booster type
+                  const progressPercentage = Math.max(0, (timeLeft / totalDuration) * 100);
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="bg-orange-100 p-3 rounded border"
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm font-medium text-orange-700">
+                          {booster.multiplier}x Boost
+                        </span>
+                        <span className="text-xs text-orange-600">
+                          {Math.ceil(timeLeft)}m left
+                        </span>
+                      </div>
+                      <div className="w-full bg-orange-200 rounded-full h-2">
+                        <div 
+                          className="bg-orange-500 h-2 rounded-full transition-all duration-1000"
+                          style={{ width: `${progressPercentage}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">No active boosters</p>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+const TreeLevelingCard = ({ user, setUser }: any) => {
+  const { toast } = useToast();
+  const currentLevel = calculateTreeLevel(user?.upgrades);
+  const nextLevel = currentLevel + 1;
+  const upgradeCost = calculateLevelUpCost(currentLevel);
+
+  const currentCPS = calculateBaseCPS(currentLevel);
+  const currentBonusYield = calculateBonusYield(currentLevel);
+  const currentMaxTime = calculateMaxGenerationTime(currentLevel);
+
+  const nextCPS = calculateBaseCPS(nextLevel);
+  const nextBonusYield = calculateBonusYield(nextLevel);
+  const nextMaxTime = calculateMaxGenerationTime(nextLevel);
+
+  const canUpgrade = user?.coins >= upgradeCost;
+
+  const upgradeTree = () => {
+    if (!canUpgrade) {
+      toast({
+        title: "Insufficient ₵ Checkels",
+        description: `You need ${upgradeCost} ₵ Checkels to upgrade to level ${nextLevel}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const updatedUser = {
+      ...user,
+      coins: user.coins - upgradeCost,
+      upgrades: {
+        ...user.upgrades,
+        treeLevel: nextLevel,
+      },
+    };
+
+    setUser(updatedUser);
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+    const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+    users[user.username] = updatedUser;
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+    const transaction = {
+      type: "upgrade",
+      amount: -upgradeCost,
+      timestamp: Date.now(),
+      description: `Upgraded tree to level ${nextLevel}`,
+    };
+
+    const transactions = JSON.parse(
+      localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
+    );
+    transactions.unshift(transaction);
+    localStorage.setItem(
+      `tree_transactions_${user.username}`,
+      JSON.stringify(transactions.slice(0, 50)),
+    );
+
+    toast({
+      title: "Tree Upgraded!",
+      description: `Your tree is now level ${nextLevel}!`,
+    });
+  };
+
+  return (
+    <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <TrendingUp className="w-6 h-6 text-blue-600" />
+          <span className="text-blue-700">Tree Leveling</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div className="text-center p-3 bg-white rounded border">
+            <p className="text-lg font-bold text-blue-600">
+              Level {currentLevel}
+            </p>
+            <p className="text-sm text-gray-500">Unlimited Growth</p>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="font-medium text-sm text-gray-700">Current Stats</h4>
+            <div className="grid grid-cols-1 gap-2 text-sm">
+              <div className="flex justify-between p-2 bg-green-50 rounded">
+                <span>CPS:</span>
+                <span className="font-bold">{currentCPS.toFixed(5)}</span>
+              </div>
+              <div className="flex justify-between p-2 bg-purple-50 rounded">
+                <span>Bonus Yield:</span>
+                <span className="font-bold">+{currentBonusYield}%</span>
+              </div>
+              <div className="flex justify-between p-2 bg-blue-50 rounded">
+                <span>Max Duration:</span>
+                <span className="font-bold">
+                  {formatDuration(currentMaxTime)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="font-medium text-sm text-gray-700">Next Level ({nextLevel}) Stats</h4>
+            <div className="grid grid-cols-1 gap-2 text-sm">
+              <div className="flex justify-between p-2 bg-green-100 rounded">
+                <span>CPS:</span>
+                <span className="font-bold text-green-600">
+                  {nextCPS.toFixed(5)} 
+                  <span className="text-xs ml-1">
+                    (+{((nextCPS - currentCPS) / currentCPS * 100).toFixed(1)}%)
+                  </span>
+                </span>
+              </div>
+              <div className="flex justify-between p-2 bg-purple-100 rounded">
+                <span>Bonus Yield:</span>
+                <span className="font-bold text-purple-600">
+                  +{nextBonusYield}%
+                  <span className="text-xs ml-1">
+                    (+{nextBonusYield - currentBonusYield}%)
+                  </span>
+                </span>
+              </div>
+              <div className="flex justify-between p-2 bg-blue-100 rounded">
+                <span>Max Duration:</span>
+                <span className="font-bold text-blue-600">
+                  {formatDuration(nextMaxTime)}
+                  <span className="text-xs ml-1">
+                    (+{formatDuration(nextMaxTime - currentMaxTime)})
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <Button
+            onClick={upgradeTree}
+            disabled={!canUpgrade}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
+          >
+            {canUpgrade ? (
+              <span className="flex items-center space-x-2">
+                <Coins className="w-4 h-4" />
+                <span>Upgrade to Level {nextLevel} ({upgradeCost} ₵ Checkels)</span>
+              </span>
+            ) : (
+              <span>Need {upgradeCost} ₵ Checkels</span>
+            )}
           </Button>
         </div>
       </CardContent>
@@ -236,183 +639,216 @@ const MoneyTreeCard = ({ user, setUser }: any) => {
   );
 };
 
-const EarningsStats = ({ user }: any) => {
-  const calculateStats = () => {
-    const now = Date.now();
-    const timeSinceLastClaim = now - (user?.treeLastClaim || now);
-    const baseInterval = user?.upgrades?.faster_growth ? 8 * 60 * 1000 : 10 * 60 * 1000;
-    const maxStorage = (user?.upgrades?.storage_level || 1) * 10;
-    const coinsPerHarvest = (user?.upgrades?.tree_level || 1);
-    const availableCoins = Math.min(
-      Math.floor(timeSinceLastClaim / baseInterval) * coinsPerHarvest,
-      maxStorage
-    );
-    
-    return {
-      availableCoins,
-      treeLevel: user?.upgrades?.tree_level || 1,
-      storageLevel: user?.upgrades?.storage_level || 1,
-      maxStorage,
-      minutesPerHarvest: baseInterval / 60000,
-      coinsPerHarvest,
-      totalEarned: user?.coins || 0
-    };
-  };
-
-  const stats = calculateStats();
-
-  return (
-    <Card className="bg-yellow-50 border-yellow-200">
-      <CardHeader>
-        <CardTitle className="flex items-center space-x-2 text-yellow-700">
-          <Coins className="w-6 h-6" />
-          <span>Tree Stats</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <div className="flex justify-between">
-            <span className="text-gray-600">Tree Level:</span>
-            <span className="font-bold text-green-600">Level {stats.treeLevel}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Storage Level:</span>
-            <span className="font-bold text-blue-600">Level {stats.storageLevel}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Coins per Harvest:</span>
-            <span className="font-bold text-purple-600">{stats.coinsPerHarvest}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Storage Capacity:</span>
-            <span className="font-bold text-orange-600">{stats.availableCoins}/{stats.maxStorage}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Minutes per Harvest:</span>
-            <span className="font-bold">{stats.minutesPerHarvest} min</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Total Balance:</span>
-            <span className="font-bold text-yellow-600">{stats.totalEarned} coins</span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-const TreeUpgrades = ({ user, setUser }: any) => {
+const BoosterStore = ({ user, setUser }: any) => {
   const { toast } = useToast();
 
-  const upgrades = [
+  const boosters = [
     {
-      id: 'tree_level',
-      name: 'Tree Level',
-      description: '+1 coin per harvest',
-      baseCost: 100,
-      getNextLevelCost: (currentLevel) => Math.floor(100 * Math.pow(1.5, currentLevel - 1)),
-      maxLevel: 10
+      name: "2x Speed Boost",
+      multiplier: 2,
+      duration: 30,
+      cost: 100,
+      description: "Double your CPS for 30 minutes",
     },
     {
-      id: 'storage_level',
-      name: 'Storage Level',
-      description: '+10 max storage',
-      baseCost: 150,
-      getNextLevelCost: (currentLevel) => Math.floor(150 * Math.pow(1.5, currentLevel - 1)),
-      maxLevel: 10
+      name: "3x Speed Boost",
+      multiplier: 3,
+      duration: 20,
+      cost: 200,
+      description: "Triple your CPS for 20 minutes",
     },
     {
-      id: 'soil_level',
-      name: 'Soil Quality',
-      description: '-30s harvest time',
-      baseCost: 200,
-      getNextLevelCost: (currentLevel) => Math.floor(200 * Math.pow(1.5, currentLevel - 1)),
-      maxLevel: 10,
-      isAvailable: (currentLevel, baseInterval) => (baseInterval - (currentLevel * 30000)) >= 300000 // Stop at 5 minutes
-    }
+      name: "5x Speed Boost",
+      multiplier: 5,
+      duration: 10,
+      cost: 400,
+      description: "5x your CPS for 10 minutes",
+    },
   ];
 
-  const purchaseUpgrade = (upgrade: any) => {
-    if (user.coins < upgrade.cost) {
+  const isBoosterActive = (boosterMultiplier: number) => {
+    const activeBoosters = user?.activeBoosters || [];
+    const now = Date.now();
+    return activeBoosters.some(
+      (booster: any) =>
+        booster.multiplier === boosterMultiplier && now < booster.endTime,
+    );
+  };
+
+  const activateBooster = (booster: any) => {
+    if (isBoosterActive(booster.multiplier)) {
       toast({
-        title: "Insufficient coins",
-        description: `You need ${upgrade.cost} coins to purchase this upgrade`,
-        variant: "destructive"
+        title: "Booster already active",
+        description: `${booster.multiplier}x booster is currently running`,
+        variant: "destructive",
       });
       return;
     }
 
+    if (user.coins < booster.cost) {
+      toast({
+        title: "Insufficient ₵ Checkels",
+        description: `You need ${booster.cost} ₵ Checkels to purchase this booster`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const newBooster = {
+      multiplier: booster.multiplier,
+      endTime: Date.now() + booster.duration * 60 * 1000,
+      name: booster.name,
+    };
+
     const updatedUser = {
       ...user,
-      coins: user.coins - upgrade.cost,
-      upgrades: {
-        ...user.upgrades,
-        [upgrade.id]: true
-      }
+      coins: user.coins - booster.cost,
+      activeBoosters: [...(user.activeBoosters || []), newBooster],
     };
 
     setUser(updatedUser);
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-    
+    localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+    const users = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
+    users[user.username] = updatedUser;
+    localStorage.setItem("casinoUsers", JSON.stringify(users));
+
+    const transaction = {
+      type: "booster",
+      amount: -booster.cost,
+      timestamp: Date.now(),
+      description: `Purchased ${booster.name}`,
+    };
+
+    const transactions = JSON.parse(
+      localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
+    );
+    transactions.unshift(transaction);
+    localStorage.setItem(
+      `tree_transactions_${user.username}`,
+      JSON.stringify(transactions.slice(0, 50)),
+    );
+
     toast({
-      title: "Upgrade Purchased!",
-      description: `You have acquired ${upgrade.name}!`,
+      title: "Booster activated!",
+      description: `${booster.multiplier}x CPS for ${booster.duration} minutes`,
     });
   };
 
   return (
-    <Card className="bg-blue-50 border-blue-200">
+    <Card>
       <CardHeader>
-        <CardTitle className="text-blue-700">Tree Upgrades</CardTitle>
+        <CardTitle className="flex items-center space-x-2">
+          <Zap className="w-6 h-6 text-orange-500" />
+          <span>Booster Store</span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {upgrades.map((upgrade) => (
-            <div key={upgrade.id} className="flex justify-between items-center p-3 bg-white rounded border">
-              <div>
-                <p className="font-medium">{upgrade.name}</p>
-                <p className="text-sm text-gray-600">{upgrade.description}</p>
-                <p className="text-xs text-purple-600">Cost: {upgrade.cost} coins</p>
-              </div>
-              <Button
-                variant={user?.upgrades?.[upgrade.id] ? "ghost" : "outline"}
-                size="sm"
-                onClick={() => purchaseUpgrade(upgrade)}
-                disabled={user?.upgrades?.[upgrade.id]}
+          {boosters.map((booster, index) => {
+            const isActive = isBoosterActive(booster.multiplier);
+            return (
+              <div
+                key={index}
+                className={`p-3 border rounded ${isActive ? "bg-gradient-to-r from-green-50 to-emerald-50 border-green-300" : "bg-gradient-to-r from-orange-50 to-yellow-50"}`}
               >
-                {user?.upgrades?.[upgrade.id] ? "Purchased" : "Buy"}
-              </Button>
-            </div>
-          ))}
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex-1">
+                    <p
+                      className={`font-medium ${isActive ? "text-green-700" : "text-orange-700"}`}
+                    >
+                      {booster.name}
+                      {isActive && (
+                        <span className="ml-2 text-xs bg-green-200 px-2 py-1 rounded">
+                          ACTIVE
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {booster.description}
+                    </p>
+                    <p
+                      className={`text-xs mt-1 ${isActive ? "text-green-600" : "text-orange-600"}`}
+                    >
+                      {booster.multiplier}x CPS for {booster.duration} minutes
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => activateBooster(booster)}
+                    disabled={isActive}
+                    variant="outline"
+                    size="sm"
+                    className={
+                      isActive
+                        ? "border-green-300 text-green-700 bg-green-100 cursor-not-allowed"
+                        : "border-orange-300 text-orange-700 hover:bg-orange-100"
+                    }
+                  >
+                    {isActive ? (
+                      <span className="text-xs">Active</span>
+                    ) : (
+                      <span className="flex items-center space-x-1">
+                        <Coins className="w-3 h-3" />
+                        <span>{booster.cost}</span>
+                      </span>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </CardContent>
     </Card>
   );
 };
 
-const WalletCard = ({ user }: any) => {
+const TransactionHistory = ({ user }: any) => {
+  const [transactions, setTransactions] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      const savedTransactions = localStorage.getItem(
+        `tree_transactions_${user.username}`,
+      );
+      setTransactions(savedTransactions ? JSON.parse(savedTransactions) : []);
+    }
+  }, [user]);
+
   return (
-    <Card className="bg-purple-50 border-purple-200">
+    <Card className="lg:col-span-3">
       <CardHeader>
-        <CardTitle className="text-purple-700">Quick Balance</CardTitle>
+        <CardTitle className="flex items-center space-x-2">
+          <History className="w-6 h-6 text-blue-500" />
+          <span>Transaction History</span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4 p-3 bg-white rounded border">
-            <div className="text-center">
-              <p className="text-sm text-gray-600">Available Coins</p>
-              <p className="font-bold text-lg text-yellow-600">{user.coins}</p>
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {transactions.slice(0, 50).map((transaction, index) => (
+            <div
+              key={index}
+              className="p-2 bg-white rounded border text-sm flex justify-between items-center"
+            >
+              <div className="flex-1">
+                <p className="font-medium">{transaction.description}</p>
+                <p className="text-xs text-gray-500">
+                  {new Date(transaction.timestamp).toLocaleString()}
+                </p>
+              </div>
+              <div
+                className={`font-bold ${transaction.amount >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {transaction.amount >= 0 ? "+" : ""}
+                {transaction.amount.toFixed(3)} ₵ Checkels
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-sm text-gray-600">Casino Chips</p>
-              <p className="font-bold text-lg text-green-600">{user.chips}</p>
-            </div>
-          </div>
-          <Link to="/wallet">
-            <Button className="w-full">
-              Manage Wallet
-            </Button>
-          </Link>
+          ))}
+          {transactions.length === 0 && (
+            <p className="text-center text-gray-500 text-sm py-4">
+              No transactions yet
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -420,146 +856,3 @@ const WalletCard = ({ user }: any) => {
 };
 
 export default TreePage;
-
-
-const TreeBoosters = ({ user, setUser }: any) => {
-  const { toast } = useToast();
-  const [activeBoosters, setActiveBoosters] = useState<{[key: string]: number}>(
-    JSON.parse(localStorage.getItem('activeBoosters') || '{}')
-  );
-
-  const boosters = [
-    {
-      id: 'speed_boost',
-      name: '2x Speed',
-      description: 'Collect coins twice as fast for 30 minutes',
-      duration: 1800000, // 30 minutes in ms
-      cost: 75,
-      multiplier: 2
-    },
-    {
-      id: 'double_coins',
-      name: '2x Coins',
-      description: 'Double coins for 1 hour',
-      duration: 3600000, // 1 hour in ms
-      cost: 50,
-      multiplier: 2
-    },
-    {
-      id: 'triple_coins',
-      name: '3x Coins',
-      description: 'Triple coins for 30 minutes',
-      duration: 1800000, // 30 minutes in ms
-      cost: 100,
-      multiplier: 3
-    },
-    {
-      id: 'super_boost',
-      name: '5x Coins',
-      description: 'Five times coins for 10 minutes',
-      duration: 600000, // 10 minutes in ms
-      cost: 150,
-      multiplier: 5
-    }
-  ];
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const updatedBoosters = { ...activeBoosters };
-      let changed = false;
-
-      Object.entries(updatedBoosters).forEach(([id, endTime]) => {
-        if (endTime < now) {
-          delete updatedBoosters[id];
-          changed = true;
-          toast({
-            title: "Booster Expired",
-            description: `The ${boosters.find(b => b.id === id)?.name} booster has expired!`,
-          });
-        }
-      });
-
-      if (changed) {
-        setActiveBoosters(updatedBoosters);
-        localStorage.setItem('activeBoosters', JSON.stringify(updatedBoosters));
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [activeBoosters]);
-
-  const activateBooster = (booster: any) => {
-    if (user.coins < booster.cost) {
-      toast({
-        title: "Insufficient coins",
-        description: `You need ${booster.cost} coins to activate this booster`,
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const now = Date.now();
-    const updatedBoosters = {
-      ...activeBoosters,
-      [booster.id]: now + booster.duration
-    };
-
-    const updatedUser = {
-      ...user,
-      coins: user.coins - booster.cost
-    };
-
-    setActiveBoosters(updatedBoosters);
-    setUser(updatedUser);
-    
-    localStorage.setItem('activeBoosters', JSON.stringify(updatedBoosters));
-    localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-
-    toast({
-      title: "Booster Activated!",
-      description: `${booster.name} is now active!`,
-    });
-  };
-
-  const getTimeRemaining = (endTime: number) => {
-    const remaining = Math.max(0, endTime - Date.now());
-    const minutes = Math.floor(remaining / 60000);
-    const seconds = Math.floor((remaining % 60000) / 1000);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
-
-  return (
-    <Card className="bg-purple-50 border-purple-200">
-      <CardHeader>
-        <CardTitle className="text-purple-700">Boosters</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {boosters.map((booster) => (
-            <div key={booster.id} className="flex justify-between items-center p-3 bg-white rounded border">
-              <div>
-                <p className="font-medium">{booster.name}</p>
-                <p className="text-sm text-gray-600">{booster.description}</p>
-                <p className="text-xs text-purple-600">Cost: {booster.cost} coins</p>
-                {activeBoosters[booster.id] && (
-                  <p className="text-xs text-green-600">
-                    Time remaining: {getTimeRemaining(activeBoosters[booster.id])}
-                  </p>
-                )}
-              </div>
-              <Button
-                variant={activeBoosters[booster.id] ? "ghost" : "outline"}
-                size="sm"
-                onClick={() => activateBooster(booster)}
-                disabled={!!activeBoosters[booster.id]}
-              >
-                {activeBoosters[booster.id] ? "Active" : "Activate"}
-              </Button>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
