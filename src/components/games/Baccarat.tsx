@@ -1,7 +1,9 @@
-
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ChipsIcon } from "@/components/ui/icons";
+import { soundManager } from "@/utils/sounds";
 import { useToast } from "@/hooks/use-toast";
 
 interface BaccaratProps {
@@ -24,7 +26,7 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
   const { toast } = useToast();
 
   const getRandomCard = () => Math.floor(Math.random() * 13) + 1;
-  
+
   const getCardValue = (card: number) => {
     if (card > 10) return 0; // Face cards worth 0
     if (card === 1) return 1; // Ace worth 1
@@ -86,20 +88,20 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
     // Generate all cards at once but reveal them step by step
     const allPlayerCards = [getRandomCard(), getRandomCard()];
     const allBankerCards = [getRandomCard(), getRandomCard()];
-    
+
     // Check if third card is needed
     const playerInitialScore = calculateScore(allPlayerCards);
     const bankerInitialScore = calculateScore(allBankerCards);
-    
+
     let playerThirdCard = null;
     let bankerThirdCard = null;
-    
+
     // Player draws third card if score is 0-5
     if (playerInitialScore <= 5) {
       playerThirdCard = getRandomCard();
       allPlayerCards.push(playerThirdCard);
     }
-    
+
     // Banker drawing rules (simplified)
     if (bankerInitialScore <= 5 && !playerThirdCard) {
       bankerThirdCard = getRandomCard();
@@ -117,7 +119,7 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
     const revealInterval = setInterval(() => {
       step++;
       setRevealStep(step);
-      
+
       if (step === 1) {
         setPlayerCards([allPlayerCards[0]]);
       } else if (step === 2) {
@@ -144,14 +146,14 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
   const finishGame = (finalPlayerCards: number[], finalBankerCards: number[], currentUser: any) => {
     const finalPlayerScore = calculateScore(finalPlayerCards);
     const finalBankerScore = calculateScore(finalBankerCards);
-    
+
     setPlayerScore(finalPlayerScore);
     setBankerScore(finalBankerScore);
     setIsRevealing(false);
 
     let winner = '';
     let payout = 0;
-    
+
     if (finalPlayerScore > finalBankerScore) {
       winner = 'player';
     } else if (finalBankerScore > finalPlayerScore) {
@@ -161,7 +163,7 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
     }
 
     let resultMessage = '';
-    
+
     if (betType === winner) {
       if (winner === 'player') {
         payout = betAmount * 2; // 1:1 payout
@@ -192,6 +194,7 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
         title: "🎉 You Win!",
         description: resultMessage,
       });
+      soundManager.playWinSound();
     } else {
       resultMessage = `${winner === 'player' ? 'Player' : winner === 'banker' ? 'Banker' : 'Tie'} wins! Better luck next time!`;
       toast({
@@ -199,6 +202,7 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
         description: resultMessage,
         variant: "destructive",
       });
+      soundManager.playLoseSound();
     }
 
     setGameResult(resultMessage);

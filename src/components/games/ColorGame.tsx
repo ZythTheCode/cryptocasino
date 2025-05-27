@@ -1,8 +1,8 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { soundManager } from "@/utils/sounds";
 
 interface ColorGameProps {
   user: any;
@@ -33,7 +33,7 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
 
   const updateColorBet = (colorName: string, amount: number) => {
     if (isRolling) return;
-    
+
     setColorBets(prev => {
       const newBets = { ...prev };
       if (amount <= 0) {
@@ -65,7 +65,7 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
   const rollDice = async () => {
     const totalBet = getTotalBet();
     const selectedColors = getSelectedColors();
-    
+
     if (selectedColors.length === 0) {
       toast({
         title: "No Colors Selected",
@@ -84,8 +84,9 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
       return;
     }
 
+    soundManager.playSpinSound();
     setIsRolling(true);
-    
+
     // Deduct bet amount immediately
     const updatedUser = {
       ...user,
@@ -115,14 +116,14 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
     // Final results after 2 seconds
     setTimeout(() => {
       clearInterval(rollAnimation);
-      
+
       // Generate final dice results
       const finalResults = [
         colors[Math.floor(Math.random() * colors.length)].name,
         colors[Math.floor(Math.random() * colors.length)].name,
         colors[Math.floor(Math.random() * colors.length)].name
       ];
-      
+
       setDiceResults(finalResults);
 
       // Calculate winnings based on individual color bets
@@ -135,11 +136,11 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
           totalMatches += matches;
           const colorBet = colorBets[selectedColor];
           let multiplier = 0;
-          
+
           if (matches === 1) multiplier = 2;
           else if (matches === 2) multiplier = 3;
           else if (matches >= 3) multiplier = 4;
-          
+
           totalWinnings += colorBet * multiplier;
         }
       });
@@ -164,12 +165,14 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
           title: "🎉 You Win!",
           description: `${totalMatches} matches! You won ${totalWinnings} chips!`,
         });
+        soundManager.playWinSound();
       } else {
         toast({
           title: "😢 Try Again!",
           description: "No matches this time. Better luck next roll!",
           variant: "destructive",
         });
+        soundManager.playLoseSound();
       }
 
       setLastResult({
@@ -192,7 +195,7 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
     if (isRolling) return;
     const selectedColors = getSelectedColors();
     if (selectedColors.length === 0) return;
-    
+
     const maxPerColor = Math.floor(user.chips / selectedColors.length);
     const newBets: {[key: string]: number} = {};
     selectedColors.forEach(color => {
@@ -222,7 +225,7 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
             {colors.map((color) => {
               const currentBet = colorBets[color.name] || 0;
               const hasBet = currentBet > 0;
-              
+
               return (
                 <div
                   key={color.name}
@@ -235,7 +238,7 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
                   <div className={`font-bold text-center mb-2 ${color.textColor}`}>
                     {color.name}
                   </div>
-                  
+
                   <div className="flex items-center space-x-2">
                     <input
                       type="number"
@@ -249,7 +252,7 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
                     />
                     <span className={`text-xs ${color.textColor}`}>chips</span>
                   </div>
-                  
+
                   <div className="flex space-x-1 mt-2">
                     <Button
                       size="sm"

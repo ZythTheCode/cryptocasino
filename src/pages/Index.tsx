@@ -5,7 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Gamepad2, Wallet, TreePine, Settings, Home } from "lucide-react";
+import { 
+  Gamepad2, 
+  Wallet, 
+  TreePine, 
+  Settings, 
+  Home,
+  CreditCard
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { signIn, signUp } from "@/lib/database";
@@ -381,12 +388,20 @@ const AdminPanel = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
     const savedCurrentUser = JSON.parse(localStorage.getItem("casinoUser") || "{}");
     setCurrentUser(savedCurrentUser);
     loadUsersFromSupabase();
   }, [activeTab]);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem('casinoUser');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+  }, []);
 
   const loadUsersFromSupabase = async () => {
     try {
@@ -421,29 +436,24 @@ const AdminPanel = () => {
       const result = await addUserBalance(userId, amount, 0);
       console.log('Add coins result:', result);
 
-      // If this is the current user, update their session
-      if (userId === currentUser.id) {
-        try {
-          const freshUser = await signIn(currentUser.username, currentUser.password_hash);
-          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-          setCurrentUser(freshUser);
-        } catch (error) {
-          console.log('Failed to refresh current user session:', error);
-        }
+      // Update current user if it's the same user
+      if (user?.id === userId) {
+        const updatedUser = { ...user, coins: result.coins, chips: result.chips };
+        setUser(updatedUser);
+        localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
       }
 
-      // Reload users to show updated data
       await loadUsersFromSupabase();
 
       toast({
-        title: "₵ Checkels Added",
+        title: "Checkels Added",
         description: `Added ${amount} ₵ Checkels to ${username}`,
       });
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error adding checkels:', error);
       toast({
         title: "Error",
-        description: error.message || "Failed to add checkels",
+        description: "Failed to add checkels",
         variant: "destructive",
       });
     } finally {
@@ -456,33 +466,28 @@ const AdminPanel = () => {
       setIsLoading(true);
       console.log(`Adding ${amount} chips to user ${username} (${userId})`);
 
-      const { addUserBalance, signIn } = await import('@/lib/database');
+      const { addUserBalance } = await import('@/lib/database');
       const result = await addUserBalance(userId, 0, amount);
       console.log('Add chips result:', result);
 
-      // If this is the current user, update their session
-      if (userId === currentUser.id) {
-        try {
-          const freshUser = await signIn(currentUser.username, currentUser.password_hash);
-          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-          setCurrentUser(freshUser);
-        } catch (error) {
-          console.log('Failed to refresh current user session:', error);
-        }
+      // Update current user if it's the same user
+      if (user?.id === userId) {
+        const updatedUser = { ...user, coins: result.coins, chips: result.chips };
+        setUser(updatedUser);
+        localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
       }
 
-      // Reload users to show updated data
       await loadUsersFromSupabase();
 
       toast({
         title: "Chips Added",
         description: `Added ${amount} chips to ${username}`,
       });
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error adding chips:', error);
       toast({
         title: "Error",
-        description: error.message || "Failed to add chips",
+        description: "Failed to add chips",
         variant: "destructive",
       });
     } finally {
@@ -1040,11 +1045,13 @@ const Authentication = () => {
   const [user, setUser] = useState<any>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('casinoUser');
     if (savedUser) {
       setUser(JSON.parse(savedUser));
+      setIsLoggedIn(true);
     }
   }, []);
 
@@ -1059,6 +1066,15 @@ const Authentication = () => {
   };
 
   const handleRegister = async () => {
+    if (!signUpUsername || !signUpPassword || !confirmPassword) {
+      toast({
+        title: "Error",
+        description: "Please fill in all fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (signUpPassword !== confirmPassword) {
       toast({
         title: "Error",
@@ -1069,21 +1085,25 @@ const Authentication = () => {
     }
 
     try {
-      // Try to register in Supabase first
-      const supabaseUser = await signUp(signUpUsername, signUpPassword);
-      if (supabaseUser) {
-        localStorage.setItem('casinoUser', JSON.stringify(supabaseUser));
-        setUser(supabaseUser);
-        toast({
-          title: "Registration successful!",
-          description: `Welcome, ${signUpUsername}!`,
-        });
-        // Navigate to trigger React Router re-render
-        setTimeout(() => navigate('/', { replace: true }), 500);
-        return;
-      }
-    } catch (error) {
-      console.error('Supabase registration failed, using localStorage fallback:', error);
+      const userData = await signUp(signUpUsername, signUpPassword);
+      localStorage.setItem("casinoUser", JSON.stringify(userData));
+      setUser(userData);
+      setIsLoggedIn(true);
+      setUsername("");
+      setPassword("");
+      setConfirmPassword("");
+
+      toast({
+        title: "Account Created! 🎉",
+        description: `Welcome to the casino, ${userData.username}! You received 10 free checkels to start.`,
+      });
+    } catch (error: any) {
+      console.error('Sign up error:', error);
+      toast({
+        title: "Signup Failed",
+        description: error.message || "Username may already exist or other error occurred",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1098,21 +1118,34 @@ const Authentication = () => {
     }
 
     try {
-      // Try Supabase login first
-      const supabaseUser = await signIn(signInUsername, signInPassword);
-      if (supabaseUser) {
-        localStorage.setItem('casinoUser', JSON.stringify(supabaseUser));
-        setUser(supabaseUser);
+      const userData = await signIn(signInUsername, signInPassword);
+
+      if (userData.is_banned) {
         toast({
-          title: "Login successful!",
-          description: `Welcome back, ${signInUsername}!`,
+          title: "Account Banned",
+          description: "Your account has been banned. Please contact support.",
+          variant: "destructive",
         });
-        // Navigate to trigger React Router re-render
-        setTimeout(() => navigate('/', { replace: true }), 500);
         return;
       }
-    } catch (error) {
-      console.error('Supabase login failed, trying localStorage fallback:', error);
+
+      localStorage.setItem("casinoUser", JSON.stringify(userData));
+      setUser(userData);
+      setIsLoggedIn(true);
+      setUsername("");
+      setPassword("");
+
+      toast({
+        title: "Login Successful! 🎉",
+        description: `Welcome back, ${userData.username}!`,
+      });
+    } catch (error: any) {
+      console.error('Login error:', error);
+      toast({
+        title: "Login Failed",
+        description: error.message || "Invalid username or password",
+        variant: "destructive",
+      });
     }
   };
 

@@ -1,12 +1,25 @@
+
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { TreePine, Home, Gamepad2, Wallet, ShoppingCart, Zap, Star, TrendingUp, History } from "lucide-react";
+import { Coins, DollarSign, Home, Gamepad2, Wallet, Users, Leaf } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { signIn, updateUserBalance, addTransaction, updateTreeUpgrade, createTreeUpgrade, getTreeUpgrade, getUserTransactions } from '@/lib/database';
+import { TreePine, ShoppingCart, Zap, Star, TrendingUp, History } from "lucide-react";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
-import { updateUserBalance, getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, addTransaction, signIn, getUserTransactions } from '@/lib/database'
-import { supabase } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const calculateTreeLevel = (upgrades: any) => {
   if (!upgrades) return 1;
@@ -57,6 +70,7 @@ const TreePage = () => {
   const [user, setUser] = useState<any>(null);
   const [treeUpgrade, setTreeUpgrade] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -64,7 +78,6 @@ const TreePage = () => {
     const loadUser = async () => {
       const savedUser = localStorage.getItem("casinoUser");
       if (!savedUser) {
-        // Don't redirect immediately, set user to null to show login message
         setUser(null);
         setIsLoading(false);
         return;
@@ -73,26 +86,38 @@ const TreePage = () => {
       const parsedUser = JSON.parse(savedUser);
 
       try {
-        // Always get fresh user data from Supabase
         const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
 
-        // Check if user is banned
         if (freshUser.is_banned) {
+          toast({
+            title: "Account Banned",
+            description: "Your account has been banned. Redirecting to login.",
+            variant: "destructive",
+          });
           localStorage.removeItem('casinoUser');
-          navigate('/');
+          setTimeout(() => navigate('/'), 2000);
           return;
         }
 
-        // Update localStorage with fresh data
         localStorage.setItem('casinoUser', JSON.stringify(freshUser));
         setUser(freshUser);
+
+        toast({
+          title: "Tree Farm Loaded",
+          description: `Welcome back to your money tree, ${freshUser.username}!`,
+        });
       } catch (error) {
         console.log('Failed to load user from Supabase:', error);
-        // If Supabase fails, redirect to login
+        toast({
+          title: "Connection Error",
+          description: "Failed to sync with database. Redirecting to login.",
+          variant: "destructive",
+        });
         localStorage.removeItem('casinoUser');
-        navigate('/');
+        setTimeout(() => navigate('/'), 2000);
       } finally {
         setIsLoading(false);
+        setPageLoading(false);
       }
     };
 
@@ -101,26 +126,22 @@ const TreePage = () => {
 
   const updateUserAndSync = async (updatedUserData: any) => {
     try {
-      // Update in Supabase first
       const dbUser = await updateUserBalance(updatedUserData.id, {
         coins: updatedUserData.coins,
         chips: updatedUserData.chips
       });
 
-      // Merge with updated data to preserve local-only fields
       const mergedUser = {
         ...updatedUserData,
         ...dbUser
       };
 
-      // Update local state and storage
       setUser(mergedUser);
       localStorage.setItem('casinoUser', JSON.stringify(mergedUser));
 
       return mergedUser;
     } catch (error) {
       console.error('Error syncing with Supabase, using localStorage:', error);
-      // Fallback to localStorage only
       setUser(updatedUserData);
       localStorage.setItem('casinoUser', JSON.stringify(updatedUserData));
       return updatedUserData;
@@ -129,19 +150,31 @@ const TreePage = () => {
 
   useEffect(() => {
     const loadTreeData = async () => {
+        if (!user?.id) return;
+        
         try {
-            // Load tree upgrade data from Supabase
             let upgrade = await getTreeUpgrade(user.id);
             if (!upgrade) {
-                // Create initial tree upgrade if it doesn't exist
                 upgrade = await createTreeUpgrade(user.id);
             }
 
             setTreeUpgrade(upgrade);
 
-            // Update user with tree level from Supabase
+            // Load persisted boosters from localStorage
+            const savedBoosters = localStorage.getItem(`activeBoosters_${user.id}`);
+            let activeBoosters = [];
+            
+            if (savedBoosters) {
+                const parsedBoosters = JSON.parse(savedBoosters);
+                // Filter out expired boosters
+                activeBoosters = parsedBoosters.filter((booster: any) => Date.now() < booster.endTime);
+                // Update localStorage with filtered boosters
+                localStorage.setItem(`activeBoosters_${user.id}`, JSON.stringify(activeBoosters));
+            }
+
             const updatedUser = {
                 ...user,
+                activeBoosters,
                 upgrades: {
                     ...user.upgrades,
                     treeLevel: upgrade.tree_level
@@ -150,25 +183,66 @@ const TreePage = () => {
 
             setUser(updatedUser);
             localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+
+            if (supabase) {
+              const treeSubscription = supabase
+                .channel('tree_upgrades_realtime')
+                .on('postgres_changes', {
+                  event: '*',
+                  schema: 'public',
+                  table: 'tree_upgrades',
+                  filter: `user_id=eq.${user.id}`
+                }, (payload) => {
+                  console.log('Tree upgrade change detected:', payload);
+                  if (payload.eventType === 'UPDATE') {
+                    setTreeUpgrade(payload.new);
+                  }
+                })
+                .subscribe();
+
+              const userSubscription = supabase
+                .channel('user_balance_realtime')
+                .on('postgres_changes', {
+                  event: 'UPDATE',
+                  schema: 'public',
+                  table: 'users',
+                  filter: `id=eq.${user.id}`
+                }, (payload) => {
+                  console.log('User balance updated:', payload);
+                  const updatedUser = { ...user, ...payload.new };
+                  setUser(updatedUser);
+                  localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+                })
+                .subscribe();
+
+              return () => {
+                supabase.removeChannel(treeSubscription);
+                supabase.removeChannel(userSubscription);
+              };
+            }
         } catch (error) {
             console.error('Failed to load tree data from Supabase:', error);
+            setTreeUpgrade({
+                tree_level: 1,
+                last_claim: new Date().toISOString(),
+                user_id: user.id
+            });
         }
     };
 
     if (user && user.id) {
         loadTreeData();
     }
-  }, [user]);
+  }, [user?.id]);
 
-  // Show loading or login prompt if user is not available
-  if (isLoading) {
+  if (isLoading || pageLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Card className="w-96">
-          <CardContent className="p-6 text-center">
-            <p>Loading...</p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="flex items-center space-x-2 text-white">
+          <TreePine className="w-6 h-6 animate-pulse text-green-400" />
+          <div className="w-6 h-6 border-2 border-green-400 border-t-transparent animate-spin rounded-full"></div>
+          <span>Loading Money Tree Farm...</span>
+        </div>
       </div>
     );
   }
@@ -270,22 +344,20 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
   const [lastClaimTime, setLastClaimTime] = useState(Date.now());
   const [generationActive, setGenerationActive] = useState(true);
   const [accumulatedCheckels, setAccumulatedCheckels] = useState(0);
+  const [showClaimDialog, setShowClaimDialog] = useState(false);
 
   const level = calculateTreeLevel(treeUpgrade);
   const baseCPS = calculateBaseCPS(level);
   const bonusYield = calculateBonusYield(level);
   const maxGenerationTime = calculateMaxGenerationTime(level);
 
-  // Calculate total booster multiplier from active boosters (fixed booster application)
   const activeBoosters = user?.activeBoosters || [];
   const now = Date.now();
 
-  // Remove expired boosters and update user state
   const validBoosters = activeBoosters.filter(
     (booster: any) => now < booster.endTime,
   );
 
-  // Update user if boosters have expired
   useEffect(() => {
     if (validBoosters.length !== activeBoosters.length) {
       const updatedUser = {
@@ -294,6 +366,7 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       };
       setUser(updatedUser);
       localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+      localStorage.setItem(`activeBoosters_${user.id}`, JSON.stringify(validBoosters));
     }
   }, [validBoosters.length, activeBoosters.length, user, setUser]);
 
@@ -304,7 +377,6 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
 
   const finalCPS = baseCPS * totalMultiplier;
 
-  // Calculate offline generation based on last_claim from Supabase
   useEffect(() => {
     const calculateOfflineGeneration = () => {
       if (!treeUpgrade) return;
@@ -315,29 +387,48 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
 
       setLastClaimTime(lastClaimTime);
 
-      if (timeOfflineSeconds > 0) {
+      if (timeOfflineSeconds > 60) { // Only calculate if offline for more than 1 minute
         const currentMaxGenerationTime = calculateMaxGenerationTime(level);
         const maxOfflineTime = Math.min(timeOfflineSeconds, currentMaxGenerationTime);
 
-        // Calculate offline generation with current level's CPS
         const currentBaseCPS = calculateBaseCPS(level);
-        const offlineGeneration = currentBaseCPS * maxOfflineTime;
+        
+        // Apply any active boosters during offline time
+        const activeBoosters = user?.activeBoosters || [];
+        const validBoosters = activeBoosters.filter((booster: any) => 
+          lastClaimTime < booster.endTime && currentTime >= lastClaimTime
+        );
+        
+        let totalMultiplier = 1;
+        for (const booster of validBoosters) {
+          // Calculate how long the booster was active during offline period
+          const boosterStart = Math.max(lastClaimTime, currentTime - (booster.endTime - lastClaimTime));
+          const boosterEnd = Math.min(currentTime, booster.endTime);
+          const boosterDuration = Math.max(0, (boosterEnd - boosterStart) / 1000);
+          
+          if (boosterDuration > 0) {
+            totalMultiplier = Math.max(totalMultiplier, booster.multiplier);
+          }
+        }
+
+        const offlineGeneration = currentBaseCPS * maxOfflineTime * totalMultiplier;
 
         setCurrentCheckels(offlineGeneration);
         setAccumulatedCheckels(offlineGeneration);
 
-        // Check if generation should stop (exceeded max time)
         const shouldStopGeneration = timeOfflineSeconds >= currentMaxGenerationTime;
         setGenerationActive(!shouldStopGeneration);
 
         if (offlineGeneration > 0) {
           toast({
             title: "Welcome back!",
-            description: `Your tree generated ${offlineGeneration.toFixed(3)} ₵ Checkels while you were away! ${shouldStopGeneration ? 'Generation stopped at max duration.' : ''}`,
+            description: `Your tree generated ${offlineGeneration.toFixed(4)} ₵ Checkels while you were away! ${shouldStopGeneration ? 'Generation stopped at max duration.' : ''}`,
           });
         }
       } else {
+        // For short offline periods, start fresh
         setCurrentCheckels(0);
+        setAccumulatedCheckels(0);
         setGenerationActive(true);
       }
     };
@@ -345,20 +436,17 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
     if (treeUpgrade) {
       calculateOfflineGeneration();
     }
-  }, [treeUpgrade, level, toast]);
+  }, [treeUpgrade, level, toast, user?.activeBoosters]);
 
-
-
-  // Real-time generation effect
+  // Separate effect for active generation timer
   useEffect(() => {
-    if (!generationActive) return;
+    if (!generationActive || !treeUpgrade) return;
 
     const interval = setInterval(() => {
       const now = Date.now();
       const timeElapsed = (now - lastClaimTime) / 1000;
 
       if (timeElapsed <= maxGenerationTime && generationActive) {
-        // Use current finalCPS which includes boosters
         setCurrentCheckels((prev) => prev + finalCPS);
       } else {
         setGenerationActive(false);
@@ -370,11 +458,13 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
     lastClaimTime,
     finalCPS,
     maxGenerationTime,
-    currentCheckels,
     generationActive,
+    treeUpgrade
   ]);
 
-  const claimCheckels = async () => {
+  
+
+  const handleClaimClick = () => {
     if (currentCheckels === 0) {
       toast({
         title: "No Checkels to claim",
@@ -383,10 +473,13 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       });
       return;
     }
+    setShowClaimDialog(true);
+  };
 
+  const claimCheckels = async () => {
     let finalCheckels = currentCheckels;
+    const offlineBonus = accumulatedCheckels > 0 ? accumulatedCheckels : 0;
 
-    // Apply bonus yield (fixed bonus yield calculation)
     if (bonusYield > 0) {
       finalCheckels = finalCheckels * (1 + (bonusYield / 100));
     }
@@ -396,16 +489,16 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       coins: user.coins + finalCheckels,
     };
 
-    // Update user via the sync function
     await updateUserAndSync(updatedUser);
 
-    // Add transaction to Supabase
     try {
       await addTransaction({
         user_id: user.id,
         type: 'conversion',
         coins_amount: finalCheckels,
-        description: 'Claimed Checkels from tree',
+        description: offlineBonus > 0 
+          ? `Claimed Checkels from tree (${(finalCheckels - offlineBonus).toFixed(4)} generated + ${offlineBonus.toFixed(4)} offline)`
+          : 'Claimed Checkels from tree',
       });
     } catch (error) {
       console.error('Error adding transaction to Supabase:', error);
@@ -416,169 +509,179 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       });
     }
 
-    // Reset generation state and update tree upgrade's last_claim time
     const newClaimTime = Date.now();
     setCurrentCheckels(0);
     setLastClaimTime(newClaimTime);
     setGenerationActive(true);
     setAccumulatedCheckels(0);
 
-    // Update last_claim in tree upgrade
     try {
       const updatedTreeUpgrade = await updateTreeUpgrade(user.id, {
-        last_claim: new Date().toISOString()
+        last_claim: new Date(newClaimTime).toISOString()
       });
       setTreeUpgrade(updatedTreeUpgrade);
     } catch (error) {
       console.error('Error updating tree upgrade last_claim:', error);
     }
 
-    const saveGenerationState = () => {
-      localStorage.setItem('treeGenerationState', JSON.stringify({
-        lastClaimTime: newClaimTime,
-        accumulatedCheckels: 0,
-      }));
-    };
-
-    saveGenerationState();
-
     toast({
       title: "Checkels claimed!",
-      description: `You earned ${finalCheckels.toFixed(3)} ₵ Checkels`,
+      description: offlineBonus > 0 
+        ? `You earned ${finalCheckels.toFixed(4)} ₵ Checkels (including ${offlineBonus.toFixed(4)} offline generation)`
+        : `You earned ${finalCheckels.toFixed(4)} ₵ Checkels`,
     });
-  };
 
-  const saveGenerationState = () => {
-    localStorage.setItem('treeGenerationState', JSON.stringify({
-      lastClaimTime: lastClaimTime,
-      accumulatedCheckels: accumulatedCheckels,
-    }));
+    setShowClaimDialog(false);
   };
 
   return (
-    <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <span className="flex items-center space-x-2">
-            <span className="text-4xl">{getTreeImage(level)}</span>
-            <span className="text-green-700">Level {level} Tree</span>
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <div className="text-center p-4 bg-white rounded-lg border">
-            <p className="text-2xl font-bold text-green-600">
-              ₵{currentCheckels.toFixed(3)}
-            </p>
-            <p className="text-sm text-gray-600">Current Checkels</p>
-            {accumulatedCheckels > 0 && (
-              <p className="text-xs text-blue-600 mt-1">
-                +{accumulatedCheckels.toFixed(3)} while away
+    <>
+      <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span className="flex items-center space-x-2">
+              <span className="text-4xl">{getTreeImage(level)}</span>
+              <span className="text-green-700">Level {level} Tree</span>
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="text-center p-4 bg-white rounded-lg border">
+              <p className="text-2xl font-bold text-green-600">
+                ₵{currentCheckels.toFixed(4)}
               </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 text-sm">
-            <div className="text-center p-2 bg-green-50 rounded">
-              <p className="font-medium">CPS</p>
-              <p className="text-green-600 font-bold">
-                {finalCPS.toFixed(5)}
-              </p>
-              {totalMultiplier > 1 && (
-                <p className="text-xs text-orange-600">
-                  {totalMultiplier.toFixed(1)}x Boost
+              <p className="text-sm text-gray-600">Current Checkels</p>
+              {accumulatedCheckels > 0 && (
+                <p className="text-xs text-blue-600 mt-1">
+                  +{accumulatedCheckels.toFixed(4)} while away
                 </p>
               )}
             </div>
-            <div className="text-center p-2 bg-purple-50 rounded">
-              <p className="font-medium">Bonus Yield</p>
-              <p className="text-purple-600 font-bold">
-                +{bonusYield}%
-              </p>
-            </div>
-            <div className="text-center p-2 bg-blue-50 rounded">
-              <p className="font-medium">Max Duration</p>
-              <p className="text-blue-600 font-bold">
-                {formatDuration(maxGenerationTime)}
-              </p>
-            </div>
-          </div>
 
-          {!generationActive && (
-            <div className="text-center text-red-600 text-sm">
-              No ₵ Checkels generating – please claim to restart
-            </div>
-          )}
-
-          <Button
-            onClick={claimCheckels}
-            className="w-full bg-green-600 hover:bg-green-700"
-          >
-            Claim ₵ Checkels
-          </Button>
-
-          {/* Generation Timer */}
-          <div className="text-center p-2 bg-blue-50 rounded">
-            <p className="text-sm font-medium text-blue-700">Generation Timer</p>
-            <p className="text-xs text-blue-600">
-              {formatDuration(Math.floor((Date.now() - lastClaimTime) / 1000))} / {formatDuration(maxGenerationTime)}
-            </p>
-            <div className="w-full bg-blue-200 rounded-full h-1.5 mt-1">
-              <div 
-                className="bg-blue-600 h-1.5 rounded-full transition-all duration-1000"
-                style={{ 
-                  width: `${Math.min(100, ((Date.now() - lastClaimTime) / 1000 / maxGenerationTime) * 100)}%` 
-                }}
-              ></div>
-            </div>
-          </div>
-
-          {/* Active Boosters Display */}
-          <div className="space-y-2">
-            <h4 className="font-medium text-sm">Active Boosters</h4>
-            {validBoosters.length > 0 ? (
-              <div className="space-y-2">
-                {validBoosters.map((booster: any, index: number) => {
-                  const timeLeft = Math.max(0, (booster.endTime - Date.now()) / 1000 / 60);
-                  const totalDuration = 30; // Assuming original duration, adjust based on booster type
-                  const progressPercentage = Math.max(0, (timeLeft / totalDuration) * 100);
-
-                  return (
-                    <div
-                      key={index}
-                      className="bg-orange-100 p-3 rounded border"
-                    >
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-sm font-medium text-orange-700">
-                          {booster.multiplier}x Boost
-                        </span>
-                        <span className="text-xs text-orange-600">
-                          {Math.ceil(timeLeft)}m left
-                        </span>
-                      </div>
-                      <div className="w-full bg-orange-200 rounded-full h-2">
-                        <div 
-                          className="bg-orange-500 h-2 rounded-full transition-all duration-1000"
-                          style={{ width: `${progressPercentage}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  );
-                })}
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="text-center p-2 bg-green-50 rounded">
+                <p className="font-medium">CPS</p>
+                <p className="text-green-600 font-bold">
+                  {finalCPS.toFixed(5)}
+                </p>
+                {totalMultiplier > 1 && (
+                  <p className="text-xs text-orange-600">
+                    {totalMultiplier.toFixed(1)}x Boost
+                  </p>
+                )}
               </div>
-            ) : (
-              <p className="text-xs text-gray-500">No active boosters</p>
+              <div className="text-center p-2 bg-purple-50 rounded">
+                <p className="font-medium">Bonus Yield</p>
+                <p className="text-purple-600 font-bold">
+                  +{bonusYield}%
+                </p>
+              </div>
+              <div className="text-center p-2 bg-blue-50 rounded">
+                <p className="font-medium">Max Duration</p>
+                <p className="text-blue-600 font-bold">
+                  {formatDuration(maxGenerationTime)}
+                </p>
+              </div>
+            </div>
+
+            {!generationActive && (
+              <div className="text-center text-red-600 text-sm">
+                No ₵ Checkels generating – please claim to restart
+              </div>
             )}
+
+            <Button
+              onClick={handleClaimClick}
+              className="w-full bg-green-600 hover:bg-green-700"
+            >
+              Claim ₵ Checkels
+            </Button>
+
+            <div className="text-center p-2 bg-blue-50 rounded">
+              <p className="text-sm font-medium text-blue-700">Generation Timer</p>
+              <p className="text-xs text-blue-600">
+                {formatDuration(Math.floor((Date.now() - lastClaimTime) / 1000))} / {formatDuration(maxGenerationTime)}
+              </p>
+              <div className="w-full bg-blue-200 rounded-full h-1.5 mt-1">
+                <div 
+                  className="bg-blue-600 h-1.5 rounded-full transition-all duration-1000"
+                  style={{ 
+                    width: `${Math.min(100, ((Date.now() - lastClaimTime) / 1000 / maxGenerationTime) * 100)}%` 
+                  }}
+                ></div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-medium text-sm">Active Boosters</h4>
+              {validBoosters.length > 0 ? (
+                <div className="space-y-2">
+                  {validBoosters.map((booster: any, index: number) => {
+                    const timeLeft = Math.max(0, (booster.endTime - Date.now()) / 1000 / 60);
+                    const totalDuration = 30;
+                    const progressPercentage = Math.max(0, (timeLeft / totalDuration) * 100);
+
+                    return (
+                      <div
+                        key={index}
+                        className="bg-orange-100 p-3 rounded border"
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-sm font-medium text-orange-700">
+                            {booster.multiplier}x Boost
+                          </span>
+                          <span className="text-xs text-orange-600">
+                            {Math.ceil(timeLeft)}m left
+                          </span>
+                        </div>
+                        <div className="w-full bg-orange-200 rounded-full h-2">
+                          <div 
+                            className="bg-orange-500 h-2 rounded-full transition-all duration-1000"
+                            style={{ width: `${progressPercentage}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">No active boosters</p>
+              )}
+            </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={showClaimDialog} onOpenChange={setShowClaimDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Claim Checkels</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to claim {currentCheckels.toFixed(4)} ₵ Checkels
+              {accumulatedCheckels > 0 && (
+                <span className="text-blue-600">
+                  <br />This includes {accumulatedCheckels.toFixed(4)} ₵ generated while you were offline
+                </span>
+              )}
+              {bonusYield > 0 && ` with a ${bonusYield}% bonus yield (+${(currentCheckels * bonusYield / 100).toFixed(4)} extra)`}.
+              <br />This will reset your generation timer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={claimCheckels}>Claim</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };
 
 const TreeLevelingCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserAndSync }: any) => {
   const { toast } = useToast();
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+  
   const currentLevel = calculateTreeLevel(treeUpgrade);
   const nextLevel = currentLevel + 1;
   const upgradeCost = calculateLevelUpCost(currentLevel);
@@ -593,16 +696,33 @@ const TreeLevelingCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUs
 
   const canUpgrade = user?.coins >= upgradeCost;
 
+  const handleUpgradeClick = () => {
+    if (!canUpgrade) {
+      toast({
+        title: "Cannot Upgrade",
+        description: `You need ${upgradeCost} ₵ Checkels to upgrade`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setShowUpgradeDialog(true);
+  };
+
   const upgradeTree = async () => {
-    if (!treeUpgrade || user.coins < upgradeCost) return;
+    if (!treeUpgrade || user.coins < upgradeCost) {
+      toast({
+        title: "Cannot Upgrade",
+        description: `You need ${upgradeCost} ₵ Checkels to upgrade`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
-      // Try to update in Supabase first
       const newTreeUpgrade = await updateTreeUpgrade(user.id, {
         tree_level: treeUpgrade.tree_level + 1
       });
 
-      // Update user balance in Supabase
       const updatedUser = {
         ...user,
         coins: Math.round((user.coins - upgradeCost) * 100) / 100,
@@ -614,13 +734,16 @@ const TreeLevelingCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUs
 
       await updateUserAndSync(updatedUser);
 
-      // Add transaction
-      await addTransaction({
-        user_id: user.id,
-        type: 'conversion',
-        coins_amount: -upgradeCost,
-        description: `Upgraded tree to level ${newTreeUpgrade.tree_level}`,
-      });
+      try {
+        await addTransaction({
+          user_id: user.id,
+          type: 'conversion',
+          coins_amount: -upgradeCost,
+          description: `Upgraded tree to level ${newTreeUpgrade.tree_level}`,
+        });
+      } catch (transactionError) {
+        console.error('Failed to record transaction:', transactionError);
+      }
 
       setTreeUpgrade(newTreeUpgrade);
 
@@ -629,126 +752,134 @@ const TreeLevelingCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUs
         description: `Your tree is now level ${newTreeUpgrade.tree_level}!`,
       });
     } catch (error) {
-      console.error('Error upgrading tree in Supabase, using localStorage:', error);
-
-      // Fallback to localStorage update
-      const newLevel = treeUpgrade.tree_level + 1;
-      const updatedTreeUpgrade = {
-        ...treeUpgrade,
-        tree_level: newLevel
-      };
-
-      const updatedUser = {
-        ...user,
-        coins: Math.round((user.coins - upgradeCost) * 100) / 100,
-        upgrades: {
-          ...user.upgrades,
-          treeLevel: newLevel
-        }
-      };
-
-      setTreeUpgrade(updatedTreeUpgrade);
-      await updateUserAndSync(updatedUser);
+      console.error('Error upgrading tree in Supabase:', error);
 
       toast({
-        title: "Tree Upgraded!",
-        description: `Your tree is now level ${newLevel}!`,
+        title: "Upgrade Failed",
+        description: "Failed to upgrade tree. Please try again later.",
+        variant: "destructive",
       });
     }
+
+    setShowUpgradeDialog(false);
   };
 
   return (
-    <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
-      <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <TrendingUp className="w-6 h-6 text-blue-600" />
-          <span className="text-blue-700">Tree Leveling</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <div className="text-center p-3 bg-white rounded border">
-            <p className="text-lg font-bold text-blue-600">
-              Level {currentLevel}
-            </p>
-            <p className="text-sm text-gray-500">Unlimited Growth</p>
-          </div>
+    <>
+      <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <TrendingUp className="w-6 h-6 text-blue-600" />
+            <span className="text-blue-700">Tree Leveling</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="text-center p-3 bg-white rounded border">
+              <p className="text-lg font-bold text-blue-600">
+                Level {currentLevel}
+              </p>
+              <p className="text-sm text-gray-500">Unlimited Growth</p>
+            </div>
 
-          <div className="space-y-3">
-            <h4 className="font-medium text-sm text-gray-700">Current Stats</h4>
-            <div className="grid grid-cols-1 gap-2 text-sm">
-              <div className="flex justify-between p-2 bg-green-50 rounded">
-                <span>CPS:</span>
-                <span className="font-bold">{currentCPS.toFixed(5)}</span>
-              </div>
-              <div className="flex justify-between p-2 bg-purple-50 rounded">
-                <span>Bonus Yield:</span>
-                <span className="font-bold">+{currentBonusYield}%</span>
-              </div>
-              <div className="flex justify-between p-2 bg-blue-50 rounded">
-                <span>Max Duration:</span>
-                <span className="font-bold">
-                  {formatDuration(currentMaxTime)}
-                </span>
+            <div className="space-y-3">
+              <h4 className="font-medium text-sm text-gray-700">Current Stats</h4>
+              <div className="grid grid-cols-1 gap-2 text-sm">
+                <div className="flex justify-between p-2 bg-green-50 rounded">
+                  <span>CPS:</span>
+                  <span className="font-bold">{currentCPS.toFixed(5)}</span>
+                </div>
+                <div className="flex justify-between p-2 bg-purple-50 rounded">
+                  <span>Bonus Yield:</span>
+                  <span className="font-bold">+{currentBonusYield}%</span>
+                </div>
+                <div className="flex justify-between p-2 bg-blue-50 rounded">
+                  <span>Max Duration:</span>
+                  <span className="font-bold">
+                    {formatDuration(currentMaxTime)}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="space-y-3">
-            <h4 className="font-medium text-sm text-gray-700">Next Level ({nextLevel}) Stats</h4>
-            <div className="grid grid-cols-1 gap-2 text-sm">
-              <div className="flex justify-between p-2 bg-green-100 rounded">
-                <span>CPS:</span>
-                <span className="font-bold text-green-600">
-                  {nextCPS.toFixed(5)} 
-                  <span className="text-xs ml-1">
-                    (+{((nextCPS - currentCPS) / currentCPS * 100).toFixed(1)}%)
+            <div className="space-y-3">
+              <h4 className="font-medium text-sm text-gray-700">Next Level ({nextLevel}) Stats</h4>
+              <div className="grid grid-cols-1 gap-2 text-sm">
+                <div className="flex justify-between p-2 bg-green-100 rounded">
+                  <span>CPS:</span>
+                  <span className="font-bold text-green-600">
+                    {nextCPS.toFixed(5)} 
+                    <span className="text-xs ml-1">
+                      (+{((nextCPS - currentCPS) / currentCPS * 100).toFixed(1)}%)
+                    </span>
                   </span>
-                </span>
-              </div>
-              <div className="flex justify-between p-2 bg-purple-100 rounded">
-                <span>Bonus Yield:</span>
-                <span className="font-bold text-purple-600">
-                  +{nextBonusYield}%
-                  <span className="text-xs ml-1">
-                    (+{nextBonusYield - currentBonusYield}%)
+                </div>
+                <div className="flex justify-between p-2 bg-purple-100 rounded">
+                  <span>Bonus Yield:</span>
+                  <span className="font-bold text-purple-600">
+                    +{nextBonusYield}%
+                    <span className="text-xs ml-1">
+                      (+{nextBonusYield - currentBonusYield}%)
+                    </span>
                   </span>
-                </span>
-              </div>
-              <div className="flex justify-between p-2 bg-blue-100 rounded">
-                <span>Max Duration:</span>
-                <span className="font-bold text-blue-600">
-                  {formatDuration(nextMaxTime)}
-                  <span className="text-xs ml-1">
-                    (+{formatDuration(nextMaxTime - currentMaxTime)})
+                </div>
+                <div className="flex justify-between p-2 bg-blue-100 rounded">
+                  <span>Max Duration:</span>
+                  <span className="font-bold text-blue-600">
+                    {formatDuration(nextMaxTime)}
+                    <span className="text-xs ml-1">
+                      (+{formatDuration(nextMaxTime - currentMaxTime)})
+                    </span>
                   </span>
-                </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <Button
-            onClick={upgradeTree}
-            disabled={!canUpgrade}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
-          >
-            {canUpgrade ? (
-              <span className="flex items-center space-x-2">
-                <CheckelsIcon className="w-4 h-4" />
-                <span>Upgrade to Level {nextLevel} ({upgradeCost} ₵ Checkels)</span>
-              </span>
-            ) : (
-              <span>Need {upgradeCost} ₵ Checkels</span>
-            )}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+            <Button
+              onClick={handleUpgradeClick}
+              disabled={!canUpgrade}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
+            >
+              {canUpgrade ? (
+                <span className="flex items-center space-x-2">
+                  <CheckelsIcon className="w-4 h-4" />
+                  <span>Upgrade to Level {nextLevel} ({upgradeCost} ₵ Checkels)</span>
+                </span>
+              ) : (
+                <span>Need {upgradeCost} ₵ Checkels</span>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Upgrade Tree</AlertDialogTitle>
+            <AlertDialogDescription>
+              Upgrade your tree from level {currentLevel} to level {nextLevel} for {upgradeCost} ₵ Checkels?
+              <br /><br />
+              <strong>Improvements:</strong>
+              <br />• CPS: {currentCPS.toFixed(5)} → {nextCPS.toFixed(5)} (+{((nextCPS - currentCPS) / currentCPS * 100).toFixed(1)}%)
+              <br />• Bonus Yield: +{currentBonusYield}% → +{nextBonusYield}% (+{nextBonusYield - currentBonusYield}%)
+              <br />• Max Duration: {formatDuration(currentMaxTime)} → {formatDuration(nextMaxTime)} (+{formatDuration(nextMaxTime - currentMaxTime)})
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={upgradeTree}>Upgrade</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };
 
 const BoosterStore = ({ user, setUser, updateUserAndSync }: any) => {
   const { toast } = useToast();
+  const [selectedBooster, setSelectedBooster] = useState<any>(null);
+  const [showPurchaseDialog, setShowPurchaseDialog] = useState(false);
 
   const boosters = [
     {
@@ -783,7 +914,7 @@ const BoosterStore = ({ user, setUser, updateUserAndSync }: any) => {
     );
   };
 
-  const activateBooster = async (booster: any) => {
+  const handlePurchaseClick = (booster: any) => {
     if (isBoosterActive(booster.multiplier)) {
       toast({
         title: "Booster already active",
@@ -802,108 +933,149 @@ const BoosterStore = ({ user, setUser, updateUserAndSync }: any) => {
       return;
     }
 
-    const newBooster = {
-      multiplier: booster.multiplier,
-      endTime: Date.now() + booster.duration * 60 * 1000,
-      name: booster.name,
-    };
+    setSelectedBooster(booster);
+    setShowPurchaseDialog(true);
+  };
 
-    const updatedUser = {
-      ...user,
-      coins: user.coins - booster.cost,
-      activeBoosters: [...(user.activeBoosters || []), newBooster],
-    };
+  const activateBooster = async () => {
+    if (!selectedBooster) return;
 
-    await updateUserAndSync(updatedUser);
-
-    // Add transaction to Supabase
     try {
-      await addTransaction({
-        user_id: user.id,
-        type: 'conversion',
-        coins_amount: -booster.cost,
-        description: `Purchased ${booster.name}`,
+      const newBooster = {
+        multiplier: selectedBooster.multiplier,
+        endTime: Date.now() + selectedBooster.duration * 60 * 1000,
+        name: selectedBooster.name,
+      };
+
+      const updatedBoosters = [...(user.activeBoosters || []), newBooster];
+
+      const updatedUser = {
+        ...user,
+        coins: user.coins - selectedBooster.cost,
+        activeBoosters: updatedBoosters,
+      };
+
+      // Persist boosters to localStorage
+      localStorage.setItem(`activeBoosters_${user.id}`, JSON.stringify(updatedBoosters));
+
+      await updateUserAndSync(updatedUser);
+
+      try {
+        await addTransaction({
+          user_id: user.id,
+          type: 'conversion',
+          coins_amount: -selectedBooster.cost,
+          description: `Purchased ${selectedBooster.name}`,
+        });
+      } catch (transactionError) {
+        console.error('Error adding transaction to Supabase:', transactionError);
+      }
+
+      toast({
+        title: "Booster activated!",
+        description: `${selectedBooster.multiplier}x CPS for ${selectedBooster.duration} minutes`,
       });
     } catch (error) {
-      console.error('Error adding transaction to Supabase:', error);
+      console.error('Error activating booster:', error);
       toast({
-        title: "Warning",
-        description: "Transaction not recorded due to database error",
+        title: "Activation Failed",
+        description: "Failed to activate booster. Please try again.",
         variant: "destructive",
       });
     }
 
-    toast({
-      title: "Booster activated!",
-      description: `${booster.multiplier}x CPS for ${booster.duration} minutes`,
-    });
+    setShowPurchaseDialog(false);
+    setSelectedBooster(null);
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <Zap className="w-6 h-6 text-orange-500" />
-          <span>Booster Store</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {boosters.map((booster, index) => {
-            const isActive = isBoosterActive(booster.multiplier);
-            return (
-              <div
-                key={index}
-                className={`p-3 border rounded ${isActive ? "bg-gradient-to-r from-green-50 to-emerald-50 border-green-300" : "bg-gradient-to-r from-orange-50 to-yellow-50"}`}
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex-1">
-                    <p
-                      className={`font-medium ${isActive ? "text-green-700" : "text-orange-700"}`}
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Zap className="w-6 h-6 text-orange-500" />
+            <span>Booster Store</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {boosters.map((booster, index) => {
+              const isActive = isBoosterActive(booster.multiplier);
+              return (
+                <div
+                  key={index}
+                  className={`p-3 border rounded ${isActive ? "bg-gradient-to-r from-green-50 to-emerald-50 border-green-300" : "bg-gradient-to-r from-orange-50 to-yellow-50"}`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                      <p
+                        className={`font-medium ${isActive ? "text-green-700" : "text-orange-700"}`}
+                      >
+                        {booster.name}
+                        {isActive && (
+                          <span className="ml-2 text-xs bg-green-200 px-2 py-1 rounded">
+                            ACTIVE
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        {booster.description}
+                      </p>
+                      <p
+                        className={`text-xs mt-1 ${isActive ? "text-green-600" : "text-orange-600"}`}
+                      >
+                        {booster.multiplier}x CPS for {booster.duration} minutes
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => handlePurchaseClick(booster)}
+                      disabled={isActive}
+                      variant="outline"
+                      size="sm"
+                      className={
+                        isActive
+                          ? "border-green-300 text-green-700 bg-green-100 cursor-not-allowed"
+                          : "border-orange-300 text-orange-700 hover:bg-orange-100"
+                      }
                     >
-                      {booster.name}
-                      {isActive && (
-                        <span className="ml-2 text-xs bg-green-200 px-2 py-1 rounded">
-                          ACTIVE
+                      {isActive ? (
+                        <span className="text-xs">Active</span>
+                      ) : (
+                        <span className="flex items-center space-x-1">
+                          <CheckelsIcon className="w-3 h-3" />
+                          <span>{booster.cost}</span>
                         </span>
                       )}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      {booster.description}
-                    </p>
-                    <p
-                      className={`text-xs mt-1 ${isActive ? "text-green-600" : "text-orange-600"}`}
-                    >
-                      {booster.multiplier}x CPS for {booster.duration} minutes
-                    </p>
+                    </Button>
                   </div>
-                  <Button
-                    onClick={() => activateBooster(booster)}
-                    disabled={isActive}
-                    variant="outline"
-                    size="sm"
-                    className={
-                      isActive
-                        ? "border-green-300 text-green-700 bg-green-100 cursor-not-allowed"
-                        : "border-orange-300 text-orange-700 hover:bg-orange-100"
-                    }
-                  >
-                    {isActive ? (
-                      <span className="text-xs">Active</span>
-                    ) : (
-                      <span className="flex items-center space-x-1">
-                        <CheckelsIcon className="w-3 h-3" />
-                        <span>{booster.cost}</span>
-                      </span>
-                    )}
-                  </Button>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={showPurchaseDialog} onOpenChange={setShowPurchaseDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Purchase Booster</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedBooster && (
+                <>
+                  Purchase {selectedBooster.name} for {selectedBooster.cost} ₵ Checkels?
+                  <br /><br />
+                  This will give you {selectedBooster.multiplier}x CPS for {selectedBooster.duration} minutes.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setSelectedBooster(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={activateBooster}>Purchase</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };
 
@@ -916,8 +1088,16 @@ const TransactionHistory = ({ user }: any) => {
         try {
           const supabaseTransactions = await getUserTransactions(user.id, 50);
 
-          // Format Supabase transactions for display
-          const formattedTransactions = supabaseTransactions.map((tx: any) => ({
+          // Filter only tree-related transactions
+          const treeTransactions = supabaseTransactions.filter((tx: any) => 
+            tx.description?.includes('tree') || 
+            tx.description?.includes('Claimed Checkels') ||
+            tx.description?.includes('Upgraded tree') ||
+            tx.description?.includes('booster') ||
+            tx.description?.includes('Purchased')
+          );
+
+          const formattedTransactions = treeTransactions.map((tx: any) => ({
             type: tx.type,
             amount: tx.coins_amount || tx.amount || 0,
             timestamp: new Date(tx.created_at).getTime(),
@@ -926,14 +1106,41 @@ const TransactionHistory = ({ user }: any) => {
 
           setTransactions(formattedTransactions);
         } catch (error) {
-          console.error('Error loading transactions from Supabase:', error);
+          console.error('Error loading tree transactions from Supabase:', error);
           setTransactions([]);
         }
       }
     };
 
     loadTransactions();
-  }, [user]);
+
+    // Set up real-time subscription for tree transactions
+    if (user?.id && supabase) {
+      const subscription = supabase
+        .channel(`tree_transactions_${user.id}_${Date.now()}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${user.id}`
+        }, (payload) => {
+          console.log('Tree transaction change detected:', payload);
+          // Only reload if it's a tree-related transaction
+          if (payload.new?.description?.includes('tree') || 
+              payload.new?.description?.includes('Claimed Checkels') ||
+              payload.new?.description?.includes('Upgraded tree') ||
+              payload.new?.description?.includes('booster') ||
+              payload.new?.description?.includes('Purchased')) {
+            loadTransactions();
+          }
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(subscription);
+      };
+    }
+  }, [user?.id]);
 
   return (
     <Card className="lg:col-span-3">
@@ -960,7 +1167,7 @@ const TransactionHistory = ({ user }: any) => {
                 className={`font-bold ${transaction.amount >= 0 ? "text-green-600" : "text-red-600"}`}
               >
                 {transaction.amount >= 0 ? "+" : ""}
-                {transaction.amount.toFixed(3)} ₵ Checkels
+                {transaction.amount.toFixed(4)} ₵ Checkels
               </div>
             </div>
           ))}

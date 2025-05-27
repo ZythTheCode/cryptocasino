@@ -7,6 +7,7 @@ import TreePage from "./pages/TreePage"
 import WalletPage from "./pages/WalletPage"
 import TopUpPage from "./pages/TopUpPage"
 import WithdrawPage from "./pages/WithdrawPage"
+import TopUpWithdrawPage from "./pages/TopUpWithdrawPage"
 import AdminDashboard from "./pages/AdminDashboard"
 import TestSupabase from "./pages/TestSupabase"
 import MigrationPage from "./pages/MigrationPage"
@@ -25,6 +26,7 @@ function App() {
           <Route path="/wallet" element={<WalletPage />} />
           <Route path="/topup" element={<TopUpPage />} />
           <Route path="/withdraw" element={<WithdrawPage />} />
+          <Route path="/topup-withdraw" element={<TopUpWithdrawPage />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/test-supabase" element={<TestSupabase />} />
           <Route path="/migration" element={<MigrationPage />} />

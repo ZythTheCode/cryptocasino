@@ -44,6 +44,72 @@ export async function signIn(username: string, password: string) {
   return data
 }
 
+// Top-up and Withdrawal functions
+export async function createTopupRequest(requestData: {
+  user_id: string
+  username: string
+  amount: number
+  payment_method: string
+  reference_number: string
+  receipt_data?: string | null
+  notes?: string | null
+  status: string
+}) {
+  const { data, error } = await supabase
+    .from('topup_requests')
+    .insert([requestData])
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function createWithdrawalRequest(requestData: {
+  user_id: string
+  username: string
+  amount: number
+  payment_method: string
+  account_details: string
+  status: string
+}) {
+  const { data, error } = await supabase
+    .from('withdrawal_requests')
+    .insert([requestData])
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function getPendingTopupRequests() {
+  const { data, error } = await supabase
+    .from('topup_requests')
+    .select('*, users(username)')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function updateTopupRequestStatus(requestId: string, status: string, processedBy: string) {
+  const { data, error } = await supabase
+    .from('topup_requests')
+    .update({ 
+      status, 
+      processed_by: processedBy,
+      processed_at: new Date().toISOString()
+    })
+    .eq('id', requestId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
 // User functions
 export async function updateUserBalance(userId: string, updates: Partial<Pick<User, 'coins' | 'chips'>>) {
   const { data, error } = await supabase
@@ -232,16 +298,27 @@ export async function getTreeUpgrade(userId: string) {
     .from('tree_upgrades')
     .select('*')
     .eq('user_id', userId)
-    .single()
+    .order('created_at', { ascending: false })
+    .limit(1)
 
   if (error && error.code !== 'PGRST116') throw error
-  return data
+  return data && data.length > 0 ? data[0] : null
 }
 
 export async function createTreeUpgrade(userId: string) {
+  // First check if one already exists
+  const existing = await getTreeUpgrade(userId)
+  if (existing) return existing
+
   const { data, error } = await supabase
     .from('tree_upgrades')
-    .insert([{ user_id: userId }])
+    .upsert([{ 
+      user_id: userId, 
+      tree_level: 1, 
+      last_claim: new Date().toISOString() 
+    }], { 
+      onConflict: 'user_id' 
+    })
     .select()
     .single()
 
@@ -250,15 +327,25 @@ export async function createTreeUpgrade(userId: string) {
 }
 
 export async function updateTreeUpgrade(userId: string, updates: Partial<TreeUpgrade>) {
+  // First ensure we have a tree upgrade record
+  const existing = await getTreeUpgrade(userId)
+  if (!existing) {
+    return await createTreeUpgrade(userId)
+  }
+
   const { data, error } = await supabase
     .from('tree_upgrades')
-    .update(updates)
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
     .eq('user_id', userId)
     .select()
-    .single()
+    .order('created_at', { ascending: false })
+    .limit(1)
 
   if (error) throw error
-  return data
+  return data && data.length > 0 ? data[0] : existing
 }
 
 // Transaction functions

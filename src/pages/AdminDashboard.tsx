@@ -1,26 +1,54 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Home, CheckCircle, XCircle, Eye, Users, Activity, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { 
+  Users, 
+  DollarSign, 
+  CreditCard, 
+  TrendingUp, 
+  Settings,
+  Plus,
+  Minus,
+  Ban,
+  UserCheck,
+  Trash2,
+  RotateCcw,
+  Crown,
+  Home,
+  Gamepad2,
+  Wallet,
+  Leaf,
+  Loader2,
+  Activity,
+  Eye,
+  CheckCircle,
+  XCircle
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { 
   getAllUsers, 
-  getPendingTopupRequests, 
-  getAllTransactions, 
+  addUserBalance, 
+  banUser, 
+  unbanUser, 
+  deleteUser, 
+  resetUserBalance, 
+  makeUserAdmin,
+  getAllTransactions,
+  getPendingTopupRequests,
   updateTopupRequestStatus,
-  updateUserBalance,
-  addTransaction,
-  banUser,
-  unbanUser,
-  deleteUser,
-  resetUserBalance,
-  addUserBalance,
-  getUserById
-} from "@/lib/database";
+  signIn
+} from '@/lib/database';
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { supabase } from '@/lib/supabase';
 
 const AdminDashboard = () => {
   const [user, setUser] = useState<any>(null);
@@ -36,7 +64,7 @@ const AdminDashboard = () => {
         // Check environment variables first
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
         const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-        
+
         if (!supabaseUrl || !supabaseKey) {
           toast({
             title: "Configuration Error",
@@ -54,7 +82,7 @@ const AdminDashboard = () => {
         }
 
         const parsedUser = JSON.parse(savedUser);
-        
+
         // Check if user is admin
         if (!parsedUser.isAdmin && !parsedUser.is_admin) {
           toast({
@@ -70,7 +98,7 @@ const AdminDashboard = () => {
 
         setUser(parsedUser);
         await loadData();
-        
+
         // Set up real-time subscriptions
         setupRealtimeSubscriptions();
       } catch (error) {
@@ -89,15 +117,14 @@ const AdminDashboard = () => {
 
     // Cleanup subscriptions on unmount
     return () => {
-      const { supabase } = require('@/lib/supabase');
-      supabase.removeAllChannels();
+      // Cleanup will be handled automatically by Supabase
     };
   }, []);
 
   const loadData = async () => {
     try {
       setIsLoading(true);
-      
+
       // Load all data in parallel for better performance
       const [pendingRequests, users, transactions] = await Promise.all([
         getPendingTopupRequests().catch(err => {
@@ -132,7 +159,7 @@ const AdminDashboard = () => {
       // Ensure data is in correct format and set state
       setPendingTopUps(Array.isArray(pendingRequests) ? pendingRequests : []);
       setAllUsers(Array.isArray(users) ? users : []);
-      
+
       // Process transactions to include username from joined user data
       const processedTransactions = Array.isArray(transactions) ? transactions.map(tx => ({
         ...tx,
@@ -159,8 +186,8 @@ const AdminDashboard = () => {
   };
 
   const setupRealtimeSubscriptions = () => {
-    const { supabase } = require('@/lib/supabase');
-    
+    if (!supabase) return;
+
     // Subscribe to user changes with specific handling
     const usersSubscription = supabase
       .channel('users_realtime')
@@ -170,15 +197,25 @@ const AdminDashboard = () => {
         table: 'users'
       }, (payload) => {
         console.log('User change detected:', payload);
-        
+
         if (payload.eventType === 'INSERT') {
           setAllUsers(prev => [payload.new, ...prev]);
+          toast({
+            title: "New User",
+            description: `User ${payload.new.username} has registered`,
+          });
         } else if (payload.eventType === 'UPDATE') {
           setAllUsers(prev => prev.map(user => 
-            user.id === payload.new.id ? payload.new : user
+            user.id === payload.new.id ? { ...user, ...payload.new } : user
           ));
+          console.log('User updated in real-time:', payload.new);
         } else if (payload.eventType === 'DELETE') {
           setAllUsers(prev => prev.filter(user => user.id !== payload.old.id));
+          toast({
+            title: "User Deleted",
+            description: `User has been deleted`,
+            variant: "destructive",
+          });
         }
       })
       .subscribe();
@@ -192,7 +229,7 @@ const AdminDashboard = () => {
         table: 'topup_requests'
       }, (payload) => {
         console.log('Topup change detected:', payload);
-        
+
         if (payload.eventType === 'INSERT' && payload.new.status === 'pending') {
           setPendingTopUps(prev => [payload.new, ...prev]);
         } else if (payload.eventType === 'UPDATE') {
@@ -216,21 +253,23 @@ const AdminDashboard = () => {
         table: 'transactions'
       }, async (payload) => {
         console.log('New transaction detected:', payload);
-        
+
         try {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('username')
-            .eq('id', payload.new.user_id)
-            .single();
-          
-          const newTransaction = {
-            ...payload.new,
-            users: userData,
-            username: userData?.username || 'Unknown User'
-          };
-          
-          setAllTransactions(prev => [newTransaction, ...prev.slice(0, 99)]);
+          if (supabase) {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('username')
+              .eq('id', payload.new.user_id)
+              .single();
+
+            const newTransaction = {
+              ...payload.new,
+              users: userData,
+              username: userData?.username || 'Unknown User'
+            };
+
+            setAllTransactions(prev => [newTransaction, ...prev.slice(0, 99)]);
+          }
         } catch (error) {
           console.error('Error fetching user for transaction:', error);
         }
@@ -245,11 +284,11 @@ const AdminDashboard = () => {
     try {
       // Find target user by user_id or username
       let targetUser = allUsers.find((u: any) => u.id === topUp.user_id);
-      
+
       if (!targetUser && topUp.username) {
         targetUser = allUsers.find((u: any) => u.username === topUp.username);
       }
-      
+
       if (!targetUser) {
         toast({
           title: "Error",
@@ -342,17 +381,16 @@ const AdminDashboard = () => {
   };
 
   const handleBanUser = async (userId: string, username: string) => {
-    if (!confirm(`Are you sure you want to ban user "${username}"?`)) return;
-
     try {
       await banUser(userId);
-      
+
       toast({
         title: "User Banned",
         description: `${username} has been banned successfully`,
       });
-      
-      // Real-time subscription will automatically update the UI
+
+      // Force reload data immediately
+      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -365,13 +403,14 @@ const AdminDashboard = () => {
   const handleUnbanUser = async (userId: string, username: string) => {
     try {
       await unbanUser(userId);
-      
+
       toast({
         title: "User Unbanned",
         description: `${username} has been unbanned successfully`,
       });
-      
-      // Real-time subscription will automatically update the UI
+
+      // Force reload data immediately
+      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -382,17 +421,16 @@ const AdminDashboard = () => {
   };
 
   const handleDeleteUser = async (userId: string, username: string) => {
-    if (!confirm(`Are you sure you want to PERMANENTLY DELETE user "${username}"? This action cannot be undone.`)) return;
-
     try {
       await deleteUser(userId);
-      
+
       toast({
         title: "User Deleted",
         description: `${username} has been deleted permanently`,
       });
-      
-      // Real-time subscription will automatically update the UI
+
+      // Force reload data immediately
+      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -403,11 +441,9 @@ const AdminDashboard = () => {
   };
 
   const handleResetBalance = async (userId: string, username: string) => {
-    if (!confirm(`Are you sure you want to reset ${username}'s balance to 0?`)) return;
-
     try {
       await resetUserBalance(userId);
-      
+
       // Add transaction record
       await addTransaction({
         user_id: userId,
@@ -421,8 +457,9 @@ const AdminDashboard = () => {
         title: "Balance Reset",
         description: `${username}'s balance has been reset to 0`,
       });
-      
-      // Real-time subscription will automatically update the UI
+
+      // Force reload data immediately
+      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -435,12 +472,12 @@ const AdminDashboard = () => {
   const handleAddBalance = async (userId: string, username: string) => {
     const coinsInput = prompt(`Enter checkels to add to ${username}:`, "0");
     const chipsInput = prompt(`Enter chips to add to ${username}:`, "0");
-    
+
     if (coinsInput === null || chipsInput === null) return;
-    
+
     const coinsToAdd = parseFloat(coinsInput) || 0;
     const chipsToAdd = parseFloat(chipsInput) || 0;
-    
+
     if (coinsToAdd === 0 && chipsToAdd === 0) {
       toast({
         title: "No Changes",
@@ -452,13 +489,14 @@ const AdminDashboard = () => {
 
     try {
       await addUserBalance(userId, coinsToAdd, chipsToAdd);
-      
+
       toast({
         title: "Balance Updated",
         description: `Added ${coinsToAdd} checkels and ${chipsToAdd} chips to ${username}`,
       });
-      
-      // Real-time subscription will automatically update the UI
+
+      // Force reload data immediately
+      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -566,7 +604,7 @@ const AdminDashboard = () => {
                             {topUp.payment_method}
                           </Badge>
                         </div>
-                        
+
                         <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
                           <div>
                             <span className="font-medium">Reference:</span> {topUp.reference_number || topUp.reference}
@@ -643,7 +681,7 @@ const AdminDashboard = () => {
                             <p>Joined: {new Date(userData.created_at).toLocaleDateString()}</p>
                           </div>
                         </div>
-                        
+
                         {/* User Management Actions */}
                         <div className="flex flex-col space-y-2 ml-4">
                           {/* Only show actions for non-admin users */}
@@ -658,16 +696,36 @@ const AdminDashboard = () => {
                                   Unban
                                 </Button>
                               ) : (
-                                <Button
-                                  onClick={() => handleBanUser(userData.id, userData.username)}
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-orange-400 text-orange-600 hover:bg-orange-50"
-                                >
-                                  Ban User
-                                </Button>
+                                <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="border-orange-400 text-orange-600 hover:bg-orange-50"
+                                  >
+                                    Ban User
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80">
+                                  <div className="space-y-3">
+                                    <h4 className="font-medium text-red-600">Ban User</h4>
+                                    <p className="text-sm text-gray-600">
+                                      Are you sure you want to ban user "{userData.username}"? This will prevent them from accessing the application.
+                                    </p>
+                                    <div className="flex space-x-2">
+                                      <Button
+                                        onClick={() => handleBanUser(userData.id, userData.username)}
+                                        variant="destructive"
+                                        size="sm"
+                                      >
+                                        Confirm Ban
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
                               )}
-                              
+
                               <Button
                                 onClick={() => handleAddBalance(userData.id, userData.username)}
                                 size="sm"
@@ -675,23 +733,63 @@ const AdminDashboard = () => {
                               >
                                 Add Balance
                               </Button>
-                              
-                              <Button
-                                onClick={() => handleResetBalance(userData.id, userData.username)}
-                                size="sm"
-                                variant="outline"
-                                className="border-yellow-400 text-yellow-600 hover:bg-yellow-50"
-                              >
-                                Reset Balance
-                              </Button>
-                              
-                              <Button
-                                onClick={() => handleDeleteUser(userData.id, userData.username)}
-                                size="sm"
-                                variant="destructive"
-                              >
-                                Delete User
-                              </Button>
+
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="border-yellow-400 text-yellow-600 hover:bg-yellow-50"
+                                  >
+                                    Reset Balance
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80">
+                                  <div className="space-y-3">
+                                    <h4 className="font-medium text-yellow-600">Reset Balance</h4>
+                                    <p className="text-sm text-gray-600">
+                                      Are you sure you want to reset "{userData.username}"'s balance to 0?
+                                    </p>
+                                    <div className="flex space-x-2">
+                                      <Button
+                                        onClick={() => handleResetBalance(userData.id, userData.username)}
+                                        variant="outline"
+                                        size="sm"
+                                      >
+                                        Confirm Reset
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                  >
+                                    Delete User
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80">
+                                  <div className="space-y-3">
+                                    <h4 className="font-medium text-red-600">Delete User</h4>
+                                    <p className="text-sm text-gray-600">
+                                      Are you sure you want to permanently delete user "{userData.username}"? This action cannot be undone and will remove all their data.
+                                    </p>
+                                    <div className="flex space-x-2">
+                                      <Button
+                                        onClick={() => handleDeleteUser(userData.id, userData.username)}
+                                        variant="destructive"
+                                        size="sm"
+                                      >
+                                        Confirm Delete
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
                             </>
                           ) : (
                             /* Admin protection message */
@@ -752,7 +850,7 @@ const AdminDashboard = () => {
                       const gameWins = allTransactions.filter(tx => tx.game === game && tx.type === 'win');
                       const totalBetAmount = gameBets.reduce((sum, tx) => sum + Math.abs(tx.amount || 0), 0);
                       const totalWinAmount = gameWins.reduce((sum, tx) => sum + (tx.amount || 0), 0);
-                      
+
                       return (
                         <div key={game} className="bg-white border rounded-lg p-3">
                           <h4 className="font-medium text-sm mb-2">{game}</h4>

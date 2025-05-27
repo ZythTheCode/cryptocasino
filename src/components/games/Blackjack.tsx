@@ -1,8 +1,8 @@
-
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { soundManager } from "@/utils/sounds";
 
 interface BlackjackProps {
   user: any;
@@ -37,7 +37,7 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
         let numValue = parseInt(value);
         if (value === 'A') numValue = 11;
         else if (['J', 'Q', 'K'].includes(value)) numValue = 10;
-        
+
         newDeck.push({ suit, value, numValue });
       });
     });
@@ -56,7 +56,7 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
   const calculateScore = (hand: PlayingCard[]): number => {
     let score = 0;
     let aces = 0;
-    
+
     hand.forEach(card => {
       if (card.value === 'A') {
         aces++;
@@ -65,12 +65,12 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
         score += card.numValue;
       }
     });
-    
+
     while (score > 21 && aces > 0) {
       score -= 10;
       aces--;
     }
-    
+
     return score;
   };
 
@@ -90,10 +90,12 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
       return;
     }
 
+    soundManager.playBetSound();
+
     // Deduct bet amount
     const updatedUser = { ...user, chips: user.chips - betAmount };
     onUpdateUser(updatedUser);
-    
+
     // Add bet transaction
     onAddTransaction({
       type: 'bet',
@@ -106,32 +108,36 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
     // Create and shuffle deck
     const newDeck = createDeck();
     let currentDeck = newDeck;
-    
+
     // Deal initial cards
     const { card: playerCard1, newDeck: deck1 } = dealCard(currentDeck);
     const { card: dealerCard1, newDeck: deck2 } = dealCard(deck1);
     const { card: playerCard2, newDeck: deck3 } = dealCard(deck2);
     const { card: dealerCard2, newDeck: finalDeck } = dealCard(deck3);
-    
+
     const newPlayerHand = [playerCard1, playerCard2];
     const newDealerHand = [dealerCard1, dealerCard2];
-    
+
     setPlayerHand(newPlayerHand);
     setDealerHand(newDealerHand);
     setDeck(finalDeck);
-    
+
     const newPlayerScore = calculateScore(newPlayerHand);
     const newDealerScore = calculateScore(newDealerHand);
-    
+
     setPlayerScore(newPlayerScore);
     setDealerScore(newDealerScore);
-    
+
+    soundManager.playCardFlipSound();
+
     // Check for immediate blackjack
     if (newPlayerScore === 21) {
       if (newDealerScore === 21) {
         endGame('Push! Both have Blackjack', betAmount);
+        soundManager.playClickSound();
       } else {
         endGame('Blackjack! You win!', betAmount * 2.5);
+        soundManager.playJackpotSound();
       }
     } else {
       setGameState('playing');
@@ -140,54 +146,65 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
 
   const hit = () => {
     const { card, newDeck } = dealCard(deck);
+
+    soundManager.playCardFlipSound();
+
     const newPlayerHand = [...playerHand, card];
     const newScore = calculateScore(newPlayerHand);
-    
+
     setPlayerHand(newPlayerHand);
     setPlayerScore(newScore);
     setDeck(newDeck);
-    
+
     if (newScore > 21) {
       endGame('Bust! You lose!', 0);
+      soundManager.playLoseSound();
     }
   };
 
   const stand = () => {
+    soundManager.playClickSound();
+
     let currentDealerHand = [...dealerHand];
     let currentDeck = [...deck];
     let currentDealerScore = dealerScore;
-    
+
     // Dealer hits on 16 and stands on 17
     while (currentDealerScore < 17) {
       const { card, newDeck } = dealCard(currentDeck);
       currentDealerHand.push(card);
       currentDealerScore = calculateScore(currentDealerHand);
       currentDeck = newDeck;
+      soundManager.playCardFlipSound();
     }
-    
+
     setDealerHand(currentDealerHand);
     setDealerScore(currentDealerScore);
-    
+
     // Determine winner
     if (currentDealerScore > 21) {
       endGame('Dealer busts! You win!', betAmount * 2);
+      soundManager.playWinSound();
     } else if (currentDealerScore > playerScore) {
       endGame('Dealer wins!', 0);
+      soundManager.playLoseSound();
     } else if (playerScore > currentDealerScore) {
       endGame('You win!', betAmount * 2);
+      soundManager.playWinSound();
     } else {
       endGame('Push! It\'s a tie!', betAmount);
+      soundManager.playClickSound();
     }
   };
 
   const endGame = (result: string, winnings: number) => {
     setGameResult(result);
     setGameState('finished');
-    
+
     if (winnings > 0) {
       const updatedUser = { ...user, chips: user.chips + winnings };
       onUpdateUser(updatedUser);
-      
+
       if (winnings > betAmount) {
         onAddTransaction({
           type: 'win',
@@ -206,7 +223,7 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
         });
       }
     }
-    
+
     toast({
       title: result,
       description: winnings > 0 ? `You won ${winnings} chips!` : "Better luck next time!",
@@ -232,7 +249,7 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
         </div>
       );
     }
-    
+
     const isRed = card.suit === '♥️' || card.suit === '♦️';
     return (
       <div className={`w-16 h-24 bg-white border-2 border-gray-300 rounded-lg flex flex-col items-center justify-center ${isRed ? 'text-red-600' : 'text-black'} font-bold text-sm`}>

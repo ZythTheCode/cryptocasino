@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { updateUserBalance, addTransaction } from '@/lib/database';
+import { soundManager } from '@/utils/sounds';
 
 interface SlotMachineProps {
   user: any;
@@ -11,10 +13,11 @@ interface SlotMachineProps {
 }
 
 const SlotMachine = ({ user, onUpdateUser, onAddTransaction }: SlotMachineProps) => {
+  const { toast } = useToast();
   const [betAmount, setBetAmount] = useState(10);
   const [isSpinning, setIsSpinning] = useState(false);
   const [reels, setReels] = useState(['🍒', '🍒', '🍒']);
-  const { toast } = useToast();
+  
 
   const symbols = ['🍒', '🍋', '🍊', '🍇', '⭐', '💎'];
   const payouts = {
@@ -39,6 +42,7 @@ const SlotMachine = ({ user, onUpdateUser, onAddTransaction }: SlotMachineProps)
       return;
     }
 
+    soundManager.playSpinSound();
     setIsSpinning(true);
 
     // Deduct bet amount
@@ -117,12 +121,14 @@ const SlotMachine = ({ user, onUpdateUser, onAddTransaction }: SlotMachineProps)
           title: "Winner!",
           description: `${winDescription}! You won ${winAmount} chips!`,
         });
+        soundManager.playWinSound();
       } else {
         toast({
           title: "No Win",
           description: "Better luck next spin!",
           variant: "destructive",
         });
+        soundManager.playLoseSound();
       }
 
       setIsSpinning(false);

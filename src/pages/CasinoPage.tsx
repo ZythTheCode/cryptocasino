@@ -638,8 +638,13 @@ const TransactionHistory = ({ user }: any) => {
           const { getUserTransactions } = await import('@/lib/database');
           const dbTransactions = await getUserTransactions(user.id, 50);
 
+          // Filter only casino-related transactions
+          const casinoTransactions = dbTransactions.filter((tx: any) => 
+            tx.game || tx.type === 'bet' || tx.type === 'win' || tx.type === 'refund'
+          );
+
           // Format transactions for display
-          const formattedTransactions = dbTransactions.map((tx: any) => ({
+          const formattedTransactions = casinoTransactions.map((tx: any) => ({
             ...tx,
             timestamp: new Date(tx.created_at).getTime(),
             description: tx.description || `${tx.type} transaction`
@@ -647,7 +652,7 @@ const TransactionHistory = ({ user }: any) => {
 
           setTransactions(formattedTransactions);
         } catch (error) {
-          console.error('Error loading transactions from Supabase:', error);
+          console.error('Error loading casino transactions from Supabase:', error);
           toast({
             title: "Warning",
             description: "Failed to load transaction history",
@@ -662,24 +667,29 @@ const TransactionHistory = ({ user }: any) => {
 
     loadTransactions();
 
-    // Set up real-time subscription for user transactions
-    const subscription = supabase
-      .channel(`user_transactions_${user?.id}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'transactions',
-        filter: `user_id=eq.${user?.id}`
-      }, (payload) => {
-        console.log('Transaction change detected for user:', payload);
-        loadTransactions(); // Reload transactions when changes occur
-      })
-      .subscribe();
+    // Set up real-time subscription for casino transactions
+    if (user?.id && supabase) {
+      const subscription = supabase
+        .channel(`casino_transactions_${user.id}_${Date.now()}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${user.id}`
+        }, (payload) => {
+          console.log('Casino transaction change detected:', payload);
+          // Only reload if it's a casino-related transaction
+          if (payload.new?.game || ['bet', 'win', 'loss'].includes(payload.new?.type)) {
+            loadTransactions();
+          }
+        })
+        .subscribe();
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [user]);
+      return () => {
+        supabase.removeChannel(subscription);
+      };
+    }
+  }, [user?.id]);
 
   return (
     <Card>

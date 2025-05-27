@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DollarSign } from "lucide-react";
 import { getUserTransactions } from "@/lib/database";
+import { supabase } from "@/lib/supabase";
 
 interface Transaction {
   type: 'bet' | 'win' | 'refund' | 'conversion';
@@ -27,7 +28,13 @@ const TransactionHistory = ({ user }: TransactionHistoryProps) => {
       if (user?.id) {
         try {
           const dbTransactions = await getUserTransactions(user.id, 50);
-          const formattedTransactions = dbTransactions.map((tx: any) => ({
+          
+          // Filter for wallet-specific transactions
+          const walletTransactions = dbTransactions.filter((tx: any) => 
+            tx.type === 'conversion' || tx.type === 'chip_conversion' || tx.type === 'topup' || tx.type === 'withdrawal'
+          );
+          
+          const formattedTransactions = walletTransactions.map((tx: any) => ({
             ...tx,
             timestamp: new Date(tx.created_at).getTime(),
             description: tx.description || `${tx.type} transaction`
@@ -41,6 +48,29 @@ const TransactionHistory = ({ user }: TransactionHistoryProps) => {
     };
 
     loadTransactions();
+
+    // Set up real-time subscription for wallet transactions
+    if (user?.id && supabase) {
+      const subscription = supabase
+        .channel(`wallet_component_transactions_${user.id}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${user.id}`
+        }, (payload) => {
+          console.log('Wallet component transaction change detected:', payload);
+          // Only reload if it's a wallet-related transaction
+          if (['conversion', 'chip_conversion', 'topup', 'withdrawal'].includes(payload.new?.type)) {
+            loadTransactions();
+          }
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(subscription);
+      };
+    }
   }, [user]);
 
   const filteredTransactions = transactions.filter(tx => {
@@ -173,15 +203,17 @@ const TransactionHistory = ({ user }: TransactionHistoryProps) => {
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0 ml-2">
-                  {transaction.type === 'conversion' ? (
-                    <div>
-                      <p className="text-xs text-red-600">-{transaction.coins_amount?.toFixed(2)} ₵</p>
-                      <p className="text-xs text-green-600">+{transaction.chips_amount?.toFixed(2)} chips</p>
-                    </div>
-                  ) : (
-                    <p className={`font-bold text-sm ${getTransactionColor(transaction)}`}>
-                      {transaction.amount > 0 ? '+' : ''}{transaction.amount.toFixed(2)} chips
-                    </p>
+                  {transaction.type === 'conversion' || transaction.type === 'chip_conversion' ? (
+                      <div className="text-xs">
+                        {transaction.coins_amount && <p className="text-red-600">-{(transaction.coins_amount || 0).toFixed(2)} ₵</p>}
+                        {transaction.chips_amount && <p className="text-green-600">+{(transaction.chips_amount || 0).toFixed(2)} chips</p>}
+                      </div>
+                    ) : (
+                    <p className={`font-bold text-sm ${
+                        (transaction.amount || 0) > 0 ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {(transaction.amount || 0) > 0 ? '+' : ''}{(transaction.amount || 0).toFixed(2)} chips
+                      </p>
                   )}
                 </div>
               </div>

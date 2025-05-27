@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { soundManager } from "@/utils/sounds";
 
 interface MinebombProps {
   user: any;
@@ -79,6 +80,8 @@ const Minebomb = ({ user, onUpdateUser, onAddTransaction }: MinebombProps) => {
       return;
     }
 
+    soundManager.playBetSound();
+
     // Deduct bet amount
     const updatedUser = { ...user, chips: user.chips - betAmount };
     onUpdateUser(updatedUser);
@@ -115,6 +118,7 @@ const Minebomb = ({ user, onUpdateUser, onAddTransaction }: MinebombProps) => {
 
     if (clickedTile.isBomb) {
       // Hit a bomb - game over
+      soundManager.playExplosionSound();
       setGameState('ended');
       setGameResult('lost');
 
@@ -132,6 +136,7 @@ const Minebomb = ({ user, onUpdateUser, onAddTransaction }: MinebombProps) => {
       });
     } else {
       // Safe tile
+      soundManager.playCollectSound();
       const newRevealedCount = revealedTiles + 1;
       setRevealedTiles(newRevealedCount);
 
@@ -148,6 +153,8 @@ const Minebomb = ({ user, onUpdateUser, onAddTransaction }: MinebombProps) => {
 
   const cashOut = (multiplier: number = currentMultiplier) => {
     if (gameState !== 'playing') return;
+
+    soundManager.playWinSound();
 
     const winnings = Math.round(betAmount * multiplier * 100) / 100;
 
