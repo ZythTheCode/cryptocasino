@@ -5,7 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import { TreePine, Home, Gamepad2, Wallet, ShoppingCart, Zap, Star, TrendingUp, History } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
-import { updateUserBalance, getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, addTransaction, signIn, getUserTransactions } from "@/lib/database";
+import { updateUserBalance, getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, addTransaction, signIn, getUserTransactions } from '@/lib/database'
+import { supabase } from '@/lib/supabase'
 
 const calculateTreeLevel = (upgrades: any) => {
   if (!upgrades) return 1;
@@ -50,39 +51,48 @@ const formatDuration = (seconds: number) => {
 };
 
 const TreePage = () => {
+  const [coins, setCoins] = useState(0);
+  const [lastClaimTime, setLastClaimTime] = useState<number>(Date.now());
+  const [accumulatedCoins, setAccumulatedCoins] = useState(0);
   const [user, setUser] = useState<any>(null);
   const [treeUpgrade, setTreeUpgrade] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
     const loadUser = async () => {
       const savedUser = localStorage.getItem("casinoUser");
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser);
+      if (!savedUser) {
+        // Don't redirect immediately, set user to null to show login message
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
 
-        try {
-          // Always get fresh user data from Supabase
-          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+      const parsedUser = JSON.parse(savedUser);
 
-          // Check if user is banned
-          if (freshUser.is_banned) {
-            localStorage.removeItem('casinoUser');
-            navigate('/');
-            return;
-          }
+      try {
+        // Always get fresh user data from Supabase
+        const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
 
-          // Update localStorage with fresh data
-          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-          setUser(freshUser);
-        } catch (error) {
-          console.log('Failed to load user from Supabase:', error);
-          // If Supabase fails, redirect to login
+        // Check if user is banned
+        if (freshUser.is_banned) {
           localStorage.removeItem('casinoUser');
           navigate('/');
+          return;
         }
-      } else {
+
+        // Update localStorage with fresh data
+        localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+        setUser(freshUser);
+      } catch (error) {
+        console.log('Failed to load user from Supabase:', error);
+        // If Supabase fails, redirect to login
+        localStorage.removeItem('casinoUser');
         navigate('/');
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -117,21 +127,6 @@ const TreePage = () => {
     }
   };
 
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">
-        <Card>
-          <CardContent className="p-6">
-            <p>Please log in to access the Tree</p>
-            <Link to="/">
-              <Button className="mt-4">Go to Login</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   useEffect(() => {
     const loadTreeData = async () => {
         try {
@@ -160,10 +155,38 @@ const TreePage = () => {
         }
     };
 
-    if (user) {
+    if (user && user.id) {
         loadTreeData();
     }
-}, [user]);
+  }, [user]);
+
+  // Show loading or login prompt if user is not available
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="w-96">
+          <CardContent className="p-6 text-center">
+            <p>Loading...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (user === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="w-96">
+          <CardContent className="p-6 text-center">
+            <p>Please log in to access the Money Tree.</p>
+            <Button onClick={() => window.location.href = '/'} className="mt-4">
+              Go to Login
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">

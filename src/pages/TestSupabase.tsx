@@ -1,6 +1,6 @@
-
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { seedDatabase } from '@/utils/seed';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -21,7 +21,7 @@ const TestSupabase = () => {
   const checkEnvironment = () => {
     const url = import.meta.env.VITE_SUPABASE_URL;
     const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    
+
     setEnvCheck({
       url: !!url,
       key: !!key
@@ -178,6 +178,9 @@ const TestSupabase = () => {
               <Button onClick={testConnection}>Test Connection</Button>
               <Button onClick={testSchema} variant="outline">
                 Test Schema
+              </Button>
+              <Button onClick={seedDatabase} variant="outline">
+                Seed Database
               </Button>
               <Button onClick={testAdminFunctions} variant="secondary">
                 Test Admin Functions

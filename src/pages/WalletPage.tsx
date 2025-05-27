@@ -6,7 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Coins, DollarSign, ArrowLeftRight, History, Home, Gamepad2, Wallet } from "lucide-react";
 import { Link } from "react-router-dom";
 import TransactionHistory from "@/components/TransactionHistory";
-import { updateUserBalance, addTransaction, signIn } from "@/lib/database";
+import { signIn, updateUserBalance, addTransaction, getUserTransactions } from '@/lib/database'
+import { supabase } from '@/lib/supabase'
 
 const WalletPage = () => {
   const [user, setUser] = useState<any>(null);

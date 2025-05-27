@@ -11,6 +11,7 @@ import Baccarat from "@/components/games/Baccarat";
 import ColorGame from "@/components/games/ColorGame";
 import Minebomb from "@/components/games/Minebomb";
 import { updateUserBalance, addTransaction, signIn } from "@/lib/database";
+import { supabase } from '@/lib/supabase'
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 
 const CasinoPage = () => {
@@ -76,7 +77,6 @@ const CasinoPage = () => {
 
   const addTransactionRecord = async (transaction: any) => {
     try {
-      const { addTransaction } = await import('@/lib/database');
       await addTransaction({
         user_id: user.id,
         type: transaction.type,
@@ -663,7 +663,6 @@ const TransactionHistory = ({ user }: any) => {
     loadTransactions();
 
     // Set up real-time subscription for user transactions
-    const { supabase } = require('@/lib/supabase');
     const subscription = supabase
       .channel(`user_transactions_${user?.id}`)
       .on('postgres_changes', {

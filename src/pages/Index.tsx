@@ -9,6 +9,7 @@ import { Gamepad2, Wallet, TreePine, Settings, Home } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { signIn, signUp } from "@/lib/database";
+import { supabase } from '@/lib/supabase'
 import { useLocation, useNavigate } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -21,38 +22,21 @@ const Index = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const loadCurrentUser = async () => {
-      const savedUser = localStorage.getItem("casinoUser");
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser);
-        
-        try {
-          // Always verify user with Supabase
-          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
-          
-          // Check if user is banned
-          if (freshUser.is_banned) {
-            console.log('User account is banned, logging out');
-            localStorage.removeItem('casinoUser');
-            setCurrentUser(null);
-            toast({
-              title: "Account Banned",
-              description: "Your account has been banned. Please contact an administrator.",
-              variant: "destructive",
-            });
-            return;
-          }
-          
-          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-          setCurrentUser(freshUser);
-        } catch (error) {
-          console.log('Session expired, please login again');
-          localStorage.removeItem('casinoUser');
+    const loadUser = async () => {
+      try {
+        const savedUser = localStorage.getItem("casinoUser");
+        if (savedUser) {
+          const parsedUser = JSON.parse(savedUser);
+          setCurrentUser(parsedUser);
         }
+      } catch (error) {
+        console.error('Error loading user:', error);
+        localStorage.removeItem("casinoUser");
+        setCurrentUser(null);
       }
     };
 
-    loadCurrentUser();
+    loadUser();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -432,11 +416,11 @@ const AdminPanel = () => {
     try {
       setIsLoading(true);
       console.log(`Adding ${amount} coins to user ${username} (${userId})`);
-      
+
       const { addUserBalance, signIn } = await import('@/lib/database');
       const result = await addUserBalance(userId, amount, 0);
       console.log('Add coins result:', result);
-      
+
       // If this is the current user, update their session
       if (userId === currentUser.id) {
         try {
@@ -447,10 +431,10 @@ const AdminPanel = () => {
           console.log('Failed to refresh current user session:', error);
         }
       }
-      
+
       // Reload users to show updated data
       await loadUsersFromSupabase();
-      
+
       toast({
         title: "₵ Checkels Added",
         description: `Added ${amount} ₵ Checkels to ${username}`,
@@ -471,11 +455,11 @@ const AdminPanel = () => {
     try {
       setIsLoading(true);
       console.log(`Adding ${amount} chips to user ${username} (${userId})`);
-      
+
       const { addUserBalance, signIn } = await import('@/lib/database');
       const result = await addUserBalance(userId, 0, amount);
       console.log('Add chips result:', result);
-      
+
       // If this is the current user, update their session
       if (userId === currentUser.id) {
         try {
@@ -486,10 +470,10 @@ const AdminPanel = () => {
           console.log('Failed to refresh current user session:', error);
         }
       }
-      
+
       // Reload users to show updated data
       await loadUsersFromSupabase();
-      
+
       toast({
         title: "Chips Added",
         description: `Added ${amount} chips to ${username}`,
@@ -512,14 +496,14 @@ const AdminPanel = () => {
     try {
       setIsLoading(true);
       console.log(`Banning user ${username} (${userId})`);
-      
+
       const { banUser } = await import('@/lib/database');
       const result = await banUser(userId);
       console.log('Ban user result:', result);
-      
+
       // Force refresh all user data
       await loadUsersFromSupabase();
-      
+
       // If the banned user is currently logged in anywhere, they should be logged out
       const currentUserData = JSON.parse(localStorage.getItem('casinoUser') || '{}');
       if (currentUserData.id === userId) {
@@ -527,7 +511,7 @@ const AdminPanel = () => {
         setCurrentUser(null);
         window.location.reload();
       }
-      
+
       toast({
         title: "User Banned",
         description: `${username} has been banned successfully`,
@@ -548,14 +532,14 @@ const AdminPanel = () => {
     try {
       setIsLoading(true);
       console.log(`Unbanning user ${username} (${userId})`);
-      
+
       const { unbanUser } = await import('@/lib/database');
       const result = await unbanUser(userId);
       console.log('Unban user result:', result);
-      
+
       // Reload users to show updated data
       await loadUsersFromSupabase();
-      
+
       toast({
         title: "User Unbanned",
         description: `${username} has been unbanned successfully`,
@@ -578,14 +562,14 @@ const AdminPanel = () => {
     try {
       setIsLoading(true);
       console.log(`Deleting user ${username} (${userId})`);
-      
+
       const { deleteUser } = await import('@/lib/database');
       const result = await deleteUser(userId);
       console.log('Delete user result:', result);
-      
+
       // Reload users to show updated data
       await loadUsersFromSupabase();
-      
+
       toast({
         title: "User Deleted",
         description: `${username} has been deleted permanently`,
@@ -608,11 +592,11 @@ const AdminPanel = () => {
     try {
       setIsLoading(true);
       console.log(`Resetting admin account ${currentUser.username} (${currentUser.id})`);
-      
+
       const { resetUserBalance, signIn } = await import('@/lib/database');
       const result = await resetUserBalance(currentUser.id);
       console.log('Reset admin account result:', result);
-      
+
       // Update current user session
       try {
         const freshUser = await signIn(currentUser.username, currentUser.password_hash);
@@ -625,10 +609,10 @@ const AdminPanel = () => {
         localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
         setCurrentUser(updatedUser);
       }
-      
+
       // Reload users to show updated data
       await loadUsersFromSupabase();
-      
+
       toast({
         title: "Admin Account Reset",
         description: "Your admin account has been reset for testing",
@@ -877,7 +861,7 @@ const AdminPanel = () => {
             )}
           </div>
 
-          
+
         </CardContent>
       </Card>
     );
@@ -949,11 +933,11 @@ const AdminPanel = () => {
                   variant="destructive"
                   onClick={async () => {
                     if (!confirm("This will reset ALL non-admin users' balances to 0. Continue?")) return;
-                    
+
                     try {
                       setIsLoading(true);
                       const { resetUserBalance, addTransaction } = await import('@/lib/database');
-                      
+
                       let resetCount = 0;
                       // Reset all non-admin users
                       for (const user of users) {
@@ -961,7 +945,7 @@ const AdminPanel = () => {
                           try {
                             console.log(`Resetting balance for user: ${user.username} (${user.id})`);
                             await resetUserBalance(user.id);
-                            
+
                             // Add transaction record
                             await addTransaction({
                               user_id: user.id,
@@ -970,16 +954,16 @@ const AdminPanel = () => {
                               coins_amount: 0,
                               chips_amount: 0
                             });
-                            
+
                             resetCount++;
                           } catch (userError) {
                             console.error(`Failed to reset user ${user.username}:`, userError);
                           }
                         }
                       }
-                      
+
                       await loadUsersFromSupabase();
-                      
+
                       toast({
                         title: "Economy Reset",
                         description: `${resetCount} non-admin accounts reset to 0 balance`,
@@ -1009,7 +993,7 @@ const AdminPanel = () => {
                     if (currentUserData) {
                       localStorage.setItem('casinoUser', currentUserData);
                     }
-                    
+
                     toast({
                       title: "LocalStorage Cleared",
                       description: "Local cache cleared (user session preserved)",

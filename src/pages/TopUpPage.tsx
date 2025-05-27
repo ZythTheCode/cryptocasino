@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, CreditCard, Smartphone, Home, TreePine, Gamepad2, Wallet } from "lucide-react";
 import { Link } from "react-router-dom";
-import { createTopupRequest, signIn } from "@/lib/database";
+import { signIn, createTopupRequest } from '@/lib/database'
+import { supabase } from '@/lib/supabase'
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 
 const TopUpPage = () => {

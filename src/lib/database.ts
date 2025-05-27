@@ -333,12 +333,10 @@ export async function createTopupRequest(request: any) {
       .from('topup_requests')
       .insert([{
         user_id: request.user_id,
-        username: request.username,
         amount: request.amount,
         payment_method: request.payment_method,
-        reference_number: request.reference_number,
+        reference: request.reference || request.reference_number,
         notes: request.notes,
-        receipt_name: request.receipt_name,
         receipt_data: request.receipt_data,
         status: request.status || 'pending'
       }])
@@ -349,7 +347,7 @@ export async function createTopupRequest(request: any) {
     return data
   } catch (error) {
     console.error('Error creating topup request:', error)
-    return false
+    throw error
   }
 }
 
