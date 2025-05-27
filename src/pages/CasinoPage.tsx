@@ -637,14 +637,14 @@ const TransactionHistory = ({ user }: any) => {
           setIsLoading(true);
           const { getUserTransactions } = await import('@/lib/database');
           const dbTransactions = await getUserTransactions(user.id, 50);
-          
+
           // Format transactions for display
           const formattedTransactions = dbTransactions.map((tx: any) => ({
             ...tx,
             timestamp: new Date(tx.created_at).getTime(),
             description: tx.description || `${tx.type} transaction`
           }));
-          
+
           setTransactions(formattedTransactions);
         } catch (error) {
           console.error('Error loading transactions from Supabase:', error);
@@ -661,7 +661,7 @@ const TransactionHistory = ({ user }: any) => {
     };
 
     loadTransactions();
-    
+
     // Set up real-time subscription for user transactions
     const { supabase } = require('@/lib/supabase');
     const subscription = supabase

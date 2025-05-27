@@ -1,10 +1,9 @@
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { TreePine, Home, Gamepad2, Wallet, ShoppingCart, Zap, Star, TrendingUp, History } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { updateUserBalance, getTreeUpgrade, createTreeUpgrade, updateTreeUpgrade, addTransaction, signIn, getUserTransactions } from "@/lib/database";
 
@@ -54,50 +53,41 @@ const TreePage = () => {
   const [user, setUser] = useState<any>(null);
   const [treeUpgrade, setTreeUpgrade] = useState<any>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const loadUserData = async () => {
+    const loadUser = async () => {
       const savedUser = localStorage.getItem("casinoUser");
       if (savedUser) {
-        const userData = JSON.parse(savedUser);
-        
+        const parsedUser = JSON.parse(savedUser);
+
         try {
-          // Always get fresh data from Supabase
-          const freshUser = await signIn(userData.username, userData.password_hash || 'migrated_user');
-          
-          // Load tree upgrade data from Supabase
-          let upgrade = await getTreeUpgrade(freshUser.id);
-          if (!upgrade) {
-            // Create initial tree upgrade if it doesn't exist
-            upgrade = await createTreeUpgrade(freshUser.id);
+          // Always get fresh user data from Supabase
+          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+
+          // Check if user is banned
+          if (freshUser.is_banned) {
+            localStorage.removeItem('casinoUser');
+            navigate('/');
+            return;
           }
-          
-          setTreeUpgrade(upgrade);
-          
-          // Update user with fresh data and tree level from Supabase
-          const updatedUser = {
-            ...freshUser,
-            upgrades: {
-              ...freshUser.upgrades,
-              treeLevel: upgrade.tree_level
-            }
-          };
-          
-          localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-          setUser(updatedUser);
+
+          // Update localStorage with fresh data
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setUser(freshUser);
         } catch (error) {
-          console.error('Failed to load from Supabase:', error);
-          // Redirect to login if Supabase fails
-          window.location.href = "/";
+          console.log('Failed to load user from Supabase:', error);
+          // If Supabase fails, redirect to login
+          localStorage.removeItem('casinoUser');
+          navigate('/');
         }
       } else {
-        // Redirect to home if no user data
-        window.location.href = "/";
+        navigate('/');
       }
     };
 
-    loadUserData();
-  }, []);
+    loadUser();
+  }, [navigate]);
 
   const updateUserAndSync = async (updatedUserData: any) => {
     try {
@@ -106,17 +96,17 @@ const TreePage = () => {
         coins: updatedUserData.coins,
         chips: updatedUserData.chips
       });
-      
+
       // Merge with updated data to preserve local-only fields
       const mergedUser = {
         ...updatedUserData,
         ...dbUser
       };
-      
+
       // Update local state and storage
       setUser(mergedUser);
       localStorage.setItem('casinoUser', JSON.stringify(mergedUser));
-      
+
       return mergedUser;
     } catch (error) {
       console.error('Error syncing with Supabase, using localStorage:', error);
@@ -141,6 +131,39 @@ const TreePage = () => {
       </div>
     );
   }
+
+  useEffect(() => {
+    const loadTreeData = async () => {
+        try {
+            // Load tree upgrade data from Supabase
+            let upgrade = await getTreeUpgrade(user.id);
+            if (!upgrade) {
+                // Create initial tree upgrade if it doesn't exist
+                upgrade = await createTreeUpgrade(user.id);
+            }
+
+            setTreeUpgrade(upgrade);
+
+            // Update user with tree level from Supabase
+            const updatedUser = {
+                ...user,
+                upgrades: {
+                    ...user.upgrades,
+                    treeLevel: upgrade.tree_level
+                }
+            };
+
+            setUser(updatedUser);
+            localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+        } catch (error) {
+            console.error('Failed to load tree data from Supabase:', error);
+        }
+    };
+
+    if (user) {
+        loadTreeData();
+    }
+}, [user]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-900 via-blue-900 to-indigo-900">
@@ -233,12 +256,12 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
   // Calculate total booster multiplier from active boosters (fixed booster application)
   const activeBoosters = user?.activeBoosters || [];
   const now = Date.now();
-  
+
   // Remove expired boosters and update user state
   const validBoosters = activeBoosters.filter(
     (booster: any) => now < booster.endTime,
   );
-  
+
   // Update user if boosters have expired
   useEffect(() => {
     if (validBoosters.length !== activeBoosters.length) {
@@ -249,7 +272,7 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       setUser(updatedUser);
       localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
     }
-  }, [validBoosters.length, activeBoosters.length]);
+  }, [validBoosters.length, activeBoosters.length, user, setUser]);
 
   const totalMultiplier = validBoosters.reduce(
     (total: number, booster: any) => total * booster.multiplier,
@@ -262,28 +285,28 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
   useEffect(() => {
     const calculateOfflineGeneration = () => {
       if (!treeUpgrade) return;
-      
+
       const lastClaimTime = new Date(treeUpgrade.last_claim).getTime();
       const currentTime = Date.now();
       const timeOfflineSeconds = (currentTime - lastClaimTime) / 1000;
-      
+
       setLastClaimTime(lastClaimTime);
-      
+
       if (timeOfflineSeconds > 0) {
         const currentMaxGenerationTime = calculateMaxGenerationTime(level);
         const maxOfflineTime = Math.min(timeOfflineSeconds, currentMaxGenerationTime);
-        
+
         // Calculate offline generation with current level's CPS
         const currentBaseCPS = calculateBaseCPS(level);
         const offlineGeneration = currentBaseCPS * maxOfflineTime;
-        
+
         setCurrentCheckels(offlineGeneration);
         setAccumulatedCheckels(offlineGeneration);
-        
+
         // Check if generation should stop (exceeded max time)
         const shouldStopGeneration = timeOfflineSeconds >= currentMaxGenerationTime;
         setGenerationActive(!shouldStopGeneration);
-        
+
         if (offlineGeneration > 0) {
           toast({
             title: "Welcome back!",
@@ -299,9 +322,9 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
     if (treeUpgrade) {
       calculateOfflineGeneration();
     }
-  }, [treeUpgrade, level]);
+  }, [treeUpgrade, level, toast]);
 
-  
+
 
   // Real-time generation effect
   useEffect(() => {
@@ -387,12 +410,26 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       console.error('Error updating tree upgrade last_claim:', error);
     }
 
+    const saveGenerationState = () => {
+      localStorage.setItem('treeGenerationState', JSON.stringify({
+        lastClaimTime: newClaimTime,
+        accumulatedCheckels: 0,
+      }));
+    };
+
     saveGenerationState();
 
     toast({
       title: "Checkels claimed!",
       description: `You earned ${finalCheckels.toFixed(3)} ₵ Checkels`,
     });
+  };
+
+  const saveGenerationState = () => {
+    localStorage.setItem('treeGenerationState', JSON.stringify({
+      lastClaimTime: lastClaimTime,
+      accumulatedCheckels: accumulatedCheckels,
+    }));
   };
 
   return (
@@ -570,14 +607,14 @@ const TreeLevelingCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUs
       });
     } catch (error) {
       console.error('Error upgrading tree in Supabase, using localStorage:', error);
-      
+
       // Fallback to localStorage update
       const newLevel = treeUpgrade.tree_level + 1;
       const updatedTreeUpgrade = {
         ...treeUpgrade,
         tree_level: newLevel
       };
-      
+
       const updatedUser = {
         ...user,
         coins: Math.round((user.coins - upgradeCost) * 100) / 100,
@@ -855,7 +892,7 @@ const TransactionHistory = ({ user }: any) => {
       if (user?.id) {
         try {
           const supabaseTransactions = await getUserTransactions(user.id, 50);
-          
+
           // Format Supabase transactions for display
           const formattedTransactions = supabaseTransactions.map((tx: any) => ({
             type: tx.type,
@@ -863,7 +900,7 @@ const TransactionHistory = ({ user }: any) => {
             timestamp: new Date(tx.created_at).getTime(),
             description: tx.description
           }));
-          
+
           setTransactions(formattedTransactions);
         } catch (error) {
           console.error('Error loading transactions from Supabase:', error);

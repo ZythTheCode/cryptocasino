@@ -34,6 +34,12 @@ const Index = () => {
           if (freshUser.is_banned) {
             console.log('User account is banned, logging out');
             localStorage.removeItem('casinoUser');
+            setCurrentUser(null);
+            toast({
+              title: "Account Banned",
+              description: "Your account has been banned. Please contact an administrator.",
+              variant: "destructive",
+            });
             return;
           }
           
@@ -68,6 +74,8 @@ const Index = () => {
 
         // Check if user is banned
         if (user.is_banned) {
+          // Clear any existing session
+          localStorage.removeItem('casinoUser');
           toast({
             title: "Account Banned",
             description: "Your account has been banned. Please contact an administrator.",
@@ -509,8 +517,16 @@ const AdminPanel = () => {
       const result = await banUser(userId);
       console.log('Ban user result:', result);
       
-      // Reload users to show updated data
+      // Force refresh all user data
       await loadUsersFromSupabase();
+      
+      // If the banned user is currently logged in anywhere, they should be logged out
+      const currentUserData = JSON.parse(localStorage.getItem('casinoUser') || '{}');
+      if (currentUserData.id === userId) {
+        localStorage.removeItem('casinoUser');
+        setCurrentUser(null);
+        window.location.reload();
+      }
       
       toast({
         title: "User Banned",

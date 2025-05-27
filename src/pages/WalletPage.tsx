@@ -13,38 +13,42 @@ const WalletPage = () => {
   const [coinsToConvert, setCoinsToConvert] = useState<number>(0);
   const [chipsToConvert, setChipsToConvert] = useState<number>(0);
   const { toast } = useToast();
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const loadUserData = async () => {
-      const savedUser = localStorage.getItem('casinoUser');
+    const loadUserAndData = async () => {
+      const savedUser = localStorage.getItem("casinoUser");
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
-        setUser(parsedUser);
-        
-        // Sync with Supabase to get latest data
+
         try {
+          // Get fresh user data from Supabase
           const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+
+          // Check if user is banned
+          if (freshUser.is_banned) {
+            localStorage.removeItem('casinoUser');
+            window.location.href = '/';
+            return;
+          }
+
+          // Update localStorage with fresh data
           localStorage.setItem('casinoUser', JSON.stringify(freshUser));
           setUser(freshUser);
+
         } catch (error) {
-          console.log('Using localStorage data, Supabase sync failed:', error);
-          // Ensure user has required fields
-          const userWithDefaults = {
-            ...parsedUser,
-            coins: parsedUser.coins || 0,
-            chips: parsedUser.chips || 0,
-            isAdmin: parsedUser.isAdmin || parsedUser.is_admin || false
-          };
-          setUser(userWithDefaults);
+          console.log('Failed to load user from Supabase:', error);
+          // If Supabase fails, redirect to login
+          localStorage.removeItem('casinoUser');
+          window.location.href = '/';
         }
       } else {
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 100);
+        window.location.href = '/';
       }
     };
-    
-    loadUserData();
+
+    loadUserAndData();
   }, []);
 
   const handleConversion = async (fromCurrency: string, toCurrency: string) => {
