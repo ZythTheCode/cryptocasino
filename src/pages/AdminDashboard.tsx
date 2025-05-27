@@ -33,6 +33,20 @@ const AdminDashboard = () => {
   useEffect(() => {
     const loadUserAndData = async () => {
       try {
+        // Check environment variables first
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        if (!supabaseUrl || !supabaseKey) {
+          toast({
+            title: "Configuration Error",
+            description: "Supabase environment variables are missing. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Secrets.",
+            variant: "destructive",
+          });
+          setIsLoading(false);
+          return;
+        }
+
         const savedUser = localStorage.getItem('casinoUser');
         if (!savedUser) {
           window.location.href = '/';
@@ -63,7 +77,7 @@ const AdminDashboard = () => {
         console.error('Error loading user and data:', error);
         toast({
           title: "Error",
-          description: "Failed to load admin dashboard",
+          description: "Failed to load admin dashboard. Check console for details.",
           variant: "destructive",
         });
       } finally {

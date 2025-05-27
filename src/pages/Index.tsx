@@ -13,7 +13,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const Index = () => {
-  const [users, setUsers] = useState<any>({});
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isLogin, setIsLogin] = useState(true);
@@ -22,33 +21,33 @@ const Index = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const savedUsers = localStorage.getItem("casinoUsers");
-    if (savedUsers) {
-      setUsers(JSON.parse(savedUsers));
-    }
+    const loadCurrentUser = async () => {
+      const savedUser = localStorage.getItem("casinoUser");
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        
+        try {
+          // Always verify user with Supabase
+          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+          
+          // Check if user is banned
+          if (freshUser.is_banned) {
+            console.log('User account is banned, logging out');
+            localStorage.removeItem('casinoUser');
+            return;
+          }
+          
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setCurrentUser(freshUser);
+        } catch (error) {
+          console.log('Session expired, please login again');
+          localStorage.removeItem('casinoUser');
+        }
+      }
+    };
 
-    const savedUser = localStorage.getItem("casinoUser");
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setCurrentUser(parsedUser);
-
-      // Sync with Supabase to get latest data
-      syncUserWithSupabase(parsedUser);
-    }
+    loadCurrentUser();
   }, []);
-
-  const syncUserWithSupabase = async (localUser: any) => {
-    try {
-      // Get fresh user data from Supabase
-      const freshUser = await signIn(localUser.username, localUser.password_hash || 'migrated_user');
-
-      // Update localStorage with fresh data
-      localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-      setCurrentUser(freshUser);
-    } catch (error) {
-      console.log('Could not sync with Supabase, using localStorage data');
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,6 +65,16 @@ const Index = () => {
       if (isLogin) {
         // Use Supabase signIn function
         const user = await signIn(username, password);
+
+        // Check if user is banned
+        if (user.is_banned) {
+          toast({
+            title: "Account Banned",
+            description: "Your account has been banned. Please contact an administrator.",
+            variant: "destructive",
+          });
+          return;
+        }
 
         // Store current user in localStorage for session management
         localStorage.setItem('casinoUser', JSON.stringify(user));
@@ -376,205 +385,248 @@ const NavigationCard = () => {
 
 const AdminPanel = () => {
   const [activeTab, setActiveTab] = useState("overview");
-  const [users, setUsers] = useState<any>({});
+  const [users, setUsers] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
-  const [pendingChanges, setPendingChanges] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    const savedUsers = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
     const savedCurrentUser = JSON.parse(localStorage.getItem("casinoUser") || "{}");
-    setUsers(savedUsers);
     setCurrentUser(savedCurrentUser);
+    loadUsersFromSupabase();
   }, [activeTab]);
+
+  const loadUsersFromSupabase = async () => {
+    try {
+      setIsLoading(true);
+      const { getAllUsers } = await import('@/lib/database');
+      const supabaseUsers = await getAllUsers();
+      setUsers(supabaseUsers || []);
+    } catch (error) {
+      console.error('Error loading users from Supabase:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load users from database",
+        variant: "destructive",
+      });
+      setUsers([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const calculateTreeLevel = (upgrades: any) => {
     if (!upgrades) return 1;
-    return upgrades.treeLevel || 1;
+    return upgrades.tree_level || upgrades.treeLevel || 1;
   };
 
-  const executeActionWithConfirmation = (action: () => void) => {
-    action();
-    setPendingChanges(true);
-  };
-
-  const handleSaveChanges = () => {
-    localStorage.setItem("casinoUsers", JSON.stringify(users));
-
-    // Update current user if they were modified
-    const updatedCurrentUser = users[currentUser.username];
-    if (updatedCurrentUser) {
-      localStorage.setItem("casinoUser", JSON.stringify(updatedCurrentUser));
-    }
-
-    toast({
-      title: "Changes Saved",
-      description: "Page will reload to apply changes...",
-    });
-
-    // Force page reload after a short delay to show the toast
-    setTimeout(() => {
-      window.location.reload();
-    }, 1000);
-  };
-
-  const handleCancelChanges = () => {
-    setPendingChanges(false);
-    // Reload users from localStorage to reset any pending changes
-    const savedUsers = JSON.parse(localStorage.getItem("casinoUsers") || "{}");
-    setUsers(savedUsers);
-  };
-
-  const handleAddCoins = (username: string, amount: number) => {
-    const action = () => {
-      const updatedUsers = { ...users };
-      updatedUsers[username].coins = (updatedUsers[username].coins || 0) + amount;
-      setUsers(updatedUsers);
-
-      if (currentUser.username === username) {
-        const updatedCurrentUser = updatedUsers[username];
-        localStorage.setItem("casinoUser", JSON.stringify(updatedCurrentUser));
-        setCurrentUser(updatedCurrentUser);
+  const handleAddCoins = async (userId: string, username: string, amount: number) => {
+    try {
+      setIsLoading(true);
+      console.log(`Adding ${amount} coins to user ${username} (${userId})`);
+      
+      const { addUserBalance, signIn } = await import('@/lib/database');
+      const result = await addUserBalance(userId, amount, 0);
+      console.log('Add coins result:', result);
+      
+      // If this is the current user, update their session
+      if (userId === currentUser.id) {
+        try {
+          const freshUser = await signIn(currentUser.username, currentUser.password_hash);
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setCurrentUser(freshUser);
+        } catch (error) {
+          console.log('Failed to refresh current user session:', error);
+        }
       }
-
+      
+      // Reload users to show updated data
+      await loadUsersFromSupabase();
+      
       toast({
         title: "₵ Checkels Added",
         description: `Added ${amount} ₵ Checkels to ${username}`,
       });
-    };
-
-    executeActionWithConfirmation(action);
+    } catch (error: any) {
+      console.error('Error adding checkels:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add checkels",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleAddChips = (username: string, amount: number) => {
-    const action = () => {
-      const updatedUsers = { ...users };
-      updatedUsers[username].chips = (updatedUsers[username].chips || 0) + amount;
-      setUsers(updatedUsers);
-
-      if (currentUser.username === username) {
-        const updatedCurrentUser = updatedUsers[username];
-        localStorage.setItem("casinoUser", JSON.stringify(updatedCurrentUser));
-        setCurrentUser(updatedCurrentUser);
+  const handleAddChips = async (userId: string, username: string, amount: number) => {
+    try {
+      setIsLoading(true);
+      console.log(`Adding ${amount} chips to user ${username} (${userId})`);
+      
+      const { addUserBalance, signIn } = await import('@/lib/database');
+      const result = await addUserBalance(userId, 0, amount);
+      console.log('Add chips result:', result);
+      
+      // If this is the current user, update their session
+      if (userId === currentUser.id) {
+        try {
+          const freshUser = await signIn(currentUser.username, currentUser.password_hash);
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+          setCurrentUser(freshUser);
+        } catch (error) {
+          console.log('Failed to refresh current user session:', error);
+        }
       }
-
+      
+      // Reload users to show updated data
+      await loadUsersFromSupabase();
+      
       toast({
         title: "Chips Added",
         description: `Added ${amount} chips to ${username}`,
       });
-    };
-
-    executeActionWithConfirmation(action);
-  };
-
-  const handleBanUser = (username: string) => {
-    const action = () => {
-      const updatedUsers = { ...users };
-      updatedUsers[username] = {
-        ...updatedUsers[username],
-        banned: true,
-        bannedAt: Date.now()
-      };
-      setUsers(updatedUsers);
-
+    } catch (error: any) {
+      console.error('Error adding chips:', error);
       toast({
-        title: "User Banned",
-        description: `${username} has been banned from the casino`,
+        title: "Error",
+        description: error.message || "Failed to add chips",
         variant: "destructive",
       });
-    };
-    executeActionWithConfirmation(action);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleUnbanUser = (username: string) => {
-    const action = () => {
-      const updatedUsers = { ...users };
-      updatedUsers[username] = {
-        ...updatedUsers[username],
-        banned: false
-      };
-      delete updatedUsers[username].bannedAt;
-      setUsers(updatedUsers);
+  const handleBanUser = async (userId: string, username: string) => {
+    if (!confirm(`Are you sure you want to ban user "${username}"?`)) return;
 
+    try {
+      setIsLoading(true);
+      console.log(`Banning user ${username} (${userId})`);
+      
+      const { banUser } = await import('@/lib/database');
+      const result = await banUser(userId);
+      console.log('Ban user result:', result);
+      
+      // Reload users to show updated data
+      await loadUsersFromSupabase();
+      
+      toast({
+        title: "User Banned",
+        description: `${username} has been banned successfully`,
+      });
+    } catch (error: any) {
+      console.error('Error banning user:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to ban user",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUnbanUser = async (userId: string, username: string) => {
+    try {
+      setIsLoading(true);
+      console.log(`Unbanning user ${username} (${userId})`);
+      
+      const { unbanUser } = await import('@/lib/database');
+      const result = await unbanUser(userId);
+      console.log('Unban user result:', result);
+      
+      // Reload users to show updated data
+      await loadUsersFromSupabase();
+      
       toast({
         title: "User Unbanned",
-        description: `${username} has been unbanned`,
+        description: `${username} has been unbanned successfully`,
       });
-    };
-    executeActionWithConfirmation(action);
+    } catch (error: any) {
+      console.error('Error unbanning user:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to unban user",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleDeleteUser = (username: string) => {
-    const action = () => {
-      if (users[username]?.isAdmin) {
-        toast({
-          title: "Cannot Delete Admin",
-          description: "Admin accounts cannot be deleted",
-          variant: "destructive",
-        });
-        return;
-      }
+  const handleDeleteUser = async (userId: string, username: string) => {
+    if (!confirm(`Are you sure you want to PERMANENTLY DELETE user "${username}"? This action cannot be undone.`)) return;
 
-      const confirmed = window.confirm(
-        `Are you sure you want to permanently delete user "${username}"?\n\nThis action cannot be undone and will:\n• Remove all user data\n• Clear transaction history\n• Delete tree progress\n• Remove wallet data`
-      );
-
-      if (!confirmed) {
-        return;
-      }
-
-      // Remove user from users object
-      const updatedUsers = { ...users };
-      delete updatedUsers[username];
-      setUsers(updatedUsers);
-
-      // Remove all user-specific data from localStorage
-      localStorage.removeItem(`tree_transactions_${username}`);
-      localStorage.removeItem(`transactions_${username}`);
-      localStorage.removeItem(`tree_generation_${username}`);
-      localStorage.removeItem(`casino_transactions_${username}`);
-      localStorage.removeItem(`user_boosters_${username}`);
-      localStorage.removeItem(`user_settings_${username}`);
-
+    try {
+      setIsLoading(true);
+      console.log(`Deleting user ${username} (${userId})`);
+      
+      const { deleteUser } = await import('@/lib/database');
+      const result = await deleteUser(userId);
+      console.log('Delete user result:', result);
+      
+      // Reload users to show updated data
+      await loadUsersFromSupabase();
+      
       toast({
         title: "User Deleted",
-        description: `${username} has been permanently deleted from the database`,
+        description: `${username} has been deleted permanently`,
       });
-    };
-    executeActionWithConfirmation(action);
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete user",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleResetAdminAccount = () => {
-    const adminUsername = currentUser.username;
-    const updatedUsers = { ...users };
+  const handleResetAdminAccount = async () => {
+    if (!confirm("Are you sure you want to reset your admin account? This will reset your balance to 0.")) return;
 
-    updatedUsers[adminUsername] = {
-      ...updatedUsers[adminUsername],
-      coins: 0,
-      chips: 0,
-      upgrades: { treeLevel: 1 },
-      activeBoosters: [],
-      lastLogin: Date.now(),
-    };
-
-    localStorage.setItem("casinoUsers", JSON.stringify(updatedUsers));
-    localStorage.setItem("casinoUser", JSON.stringify(updatedUsers[adminUsername]));
-
-    // Clear admin's transaction histories
-    localStorage.removeItem(`tree_transactions_${adminUsername}`);
-    localStorage.removeItem(`transactions_${adminUsername}`);
-    localStorage.removeItem(`tree_generation_${adminUsername}`);
-
-    setUsers(updatedUsers);
-    setCurrentUser(updatedUsers[adminUsername]);
-
-    toast({
-      title: "Admin Account Reset",
-      description: "Your admin account has been reset for testing",
-    });
-
-    // Reload the page to reflect changes
-    setTimeout(() => window.location.reload(), 1000);
+    try {
+      setIsLoading(true);
+      console.log(`Resetting admin account ${currentUser.username} (${currentUser.id})`);
+      
+      const { resetUserBalance, signIn } = await import('@/lib/database');
+      const result = await resetUserBalance(currentUser.id);
+      console.log('Reset admin account result:', result);
+      
+      // Update current user session
+      try {
+        const freshUser = await signIn(currentUser.username, currentUser.password_hash);
+        localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+        setCurrentUser(freshUser);
+      } catch (error) {
+        console.log('Failed to refresh admin session after reset:', error);
+        // Fallback: manually update the current user
+        const updatedUser = { ...currentUser, coins: 0, chips: 0 };
+        localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+        setCurrentUser(updatedUser);
+      }
+      
+      // Reload users to show updated data
+      await loadUsersFromSupabase();
+      
+      toast({
+        title: "Admin Account Reset",
+        description: "Your admin account has been reset for testing",
+      });
+    } catch (error: any) {
+      console.error('Error resetting admin account:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reset admin account",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const clearAllLocalStorageData = () => {
@@ -606,16 +658,15 @@ const AdminPanel = () => {
   };
 
   const getTotalStats = () => {
-    const userList = Object.values(users);
-    const nonAdminUsers = userList.filter((user: any) => !user.isAdmin);
+    const nonAdminUsers = users.filter((user: any) => !user.is_admin);
     return {
       totalUsers: nonAdminUsers.length,
       totalCoins: nonAdminUsers.reduce((sum: number, user: any) => sum + (user.coins || 0), 0),
       totalChips: nonAdminUsers.reduce((sum: number, user: any) => sum + (user.chips || 0), 0),
       activeUsers: nonAdminUsers.filter((user: any) =>
-        user.lastLogin && Date.now() - user.lastLogin < 24 * 60 * 60 * 1000
+        user.updated_at && Date.now() - new Date(user.updated_at).getTime() < 24 * 60 * 60 * 1000
       ).length,
-      bannedUsers: nonAdminUsers.filter((user: any) => user.banned).length
+      bannedUsers: nonAdminUsers.filter((user: any) => user.is_banned).length
     };
   };
 
@@ -668,17 +719,17 @@ const AdminPanel = () => {
             <div className="bg-white p-4 rounded-lg border shadow-sm">
               <h3 className="font-bold mb-3 text-gray-700">🏆 Top Players by ₵ Checkels</h3>
               <div className="space-y-2">
-                {Object.entries(users)
-                  .filter(([, userData]: [string, any]) => !userData.isAdmin)
-                  .sort(([, a]: [string, any], [, b]: [string, any]) => (b.coins || 0) - (a.coins || 0))
+                {users
+                  .filter((userData: any) => !userData.is_admin)
+                  .sort((a: any, b: any) => (b.coins || 0) - (a.coins || 0))
                   .slice(0, 5)
-                  .map(([username, userData]: [string, any], index) => (
-                    <div key={username} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
+                  .map((userData: any, index) => (
+                    <div key={userData.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
                       <span className="flex items-center space-x-2">
                         <span className="font-bold">#{index + 1}</span>
-                        <span>{username}</span>
-                        {userData.isAdmin && <span className="text-red-500 text-xs">(Admin)</span>}
-                        {userData.banned && <span className="text-red-600 text-xs">🚫</span>}
+                        <span>{userData.username}</span>
+                        {userData.is_admin && <span className="text-red-500 text-xs">(Admin)</span>}
+                        {userData.is_banned && <span className="text-red-600 text-xs">🚫</span>}
                       </span>
                       <span className="font-medium text-green-600">{(userData.coins || 0).toFixed(2)} ₵</span>
                     </div>
@@ -689,17 +740,17 @@ const AdminPanel = () => {
             <div className="bg-white p-4 rounded-lg border shadow-sm">
               <h3 className="font-bold mb-3 text-gray-700">💰 Top Players by Chips</h3>
               <div className="space-y-2">
-                {Object.entries(users)
-                  .filter(([, userData]: [string, any]) => !userData.isAdmin)
-                  .sort(([, a]: [string, any], [, b]: [string, any]) => (b.chips || 0) - (a.chips || 0))
+                {users
+                  .filter((userData: any) => !userData.is_admin)
+                  .sort((a: any, b: any) => (b.chips || 0) - (a.chips || 0))
                   .slice(0, 5)
-                  .map(([username, userData]: [string, any], index) => (
-                    <div key={username} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
+                  .map((userData: any, index) => (
+                    <div key={userData.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
                       <span className="flex items-center space-x-2">
                         <span className="font-bold">#{index + 1}</span>
-                        <span>{username}</span>
-                        {userData.isAdmin && <span className="text-red-500 text-xs">(Admin)</span>}
-                        {userData.banned && <span className="text-red-600 text-xs">🚫</span>}
+                        <span>{userData.username}</span>
+                        {userData.is_admin && <span className="text-red-500 text-xs">(Admin)</span>}
+                        {userData.is_banned && <span className="text-red-600 text-xs">🚫</span>}
                       </span>
                       <span className="font-medium text-purple-600">{(userData.chips || 0).toFixed(2)} chips</span>
                     </div>
@@ -728,88 +779,89 @@ const AdminPanel = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4 max-h-96 overflow-y-auto">
-            {Object.entries(users).map(([username, userData]: [string, any]) => (
-              <div key={username} className={`p-4 bg-white rounded-lg border shadow-sm ${userData.banned ? 'border-red-300 bg-red-50' : ''}`}>
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <h3 className="font-bold text-lg flex items-center space-x-2">
-                      <span>{username}</span>
-                      {userData.isAdmin && <span className="text-red-500 text-sm bg-red-100 px-2 py-1 rounded">(Admin)</span>}
-                      {userData.banned && <span className="text-red-600 text-sm bg-red-200 px-2 py-1 rounded">🚫 BANNED</span>}
-                    </h3>
-                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
-                      <div>₵ Checkels: <span className="font-medium text-green-600">{(userData.coins || 0).toFixed(2)}</span></div>
-                      <div>Chips: <span className="font-medium text-purple-600">{(userData.chips || 0).toFixed(2)}</span></div>
-                      <div>Tree Level: <span className="font-medium text-blue-600">{calculateTreeLevel(userData.upgrades)}</span></div>
-                      <div>Status: <span className={`font-medium ${userData.banned ? 'text-red-600' : 'text-green-600'}`}>
-                        {userData.banned ? 'Banned' : 'Active'}
-                      </span></div>
+            {isLoading ? (
+              <div className="text-center py-8">
+                <span className="text-lg">Loading users...</span>
+              </div>
+            ) : (
+              users.map((userData: any) => (
+                <div key={userData.id} className={`p-4 bg-white rounded-lg border shadow-sm ${userData.is_banned ? 'border-red-300 bg-red-50' : ''}`}>
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h3 className="font-bold text-lg flex items-center space-x-2">
+                        <span>{userData.username}</span>
+                        {userData.is_admin && <span className="text-red-500 text-sm bg-red-100 px-2 py-1 rounded">(Admin)</span>}
+                        {userData.is_banned && <span className="text-red-600 text-sm bg-red-200 px-2 py-1 rounded">🚫 BANNED</span>}
+                      </h3>
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                        <div>₵ Checkels: <span className="font-medium text-green-600">{(userData.coins || 0).toFixed(2)}</span></div>
+                        <div>Chips: <span className="font-medium text-purple-600">{(userData.chips || 0).toFixed(2)}</span></div>
+                        <div>Tree Level: <span className="font-medium text-blue-600">{calculateTreeLevel(userData.tree_upgrades?.[0])}</span></div>
+                        <div>Status: <span className={`font-medium ${userData.is_banned ? 'text-red-600' : 'text-green-600'}`}>
+                          {userData.is_banned ? 'Banned' : 'Active'}
+                        </span></div>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-600">
+                        <div>Created: {new Date(userData.created_at).toLocaleString()}</div>
+                        <div>Last Updated: {new Date(userData.updated_at).toLocaleString()}</div>
+                      </div>
                     </div>
-                    <div className="mt-2 text-xs text-gray-600">
-                      <div>Last Login: {userData.lastLogin ? new Date(userData.lastLogin).toLocaleString() : 'Never'}</div>
-                      {userData.bannedAt && <div className="text-red-600">Banned: {new Date(userData.bannedAt).toLocaleString()}</div>}
+                    <div className="flex flex-col space-y-2 ml-4">
+                      <div className="flex space-x-2">
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => handleAddCoins(userData.id, userData.username, 1000)}
+                          disabled={isLoading}
+                        >
+                          +1000 ₵
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => handleAddChips(userData.id, userData.username, 1000)}
+                          disabled={isLoading}
+                        >
+                          +1000 💰
+                        </Button>
+                      </div>
+                      {!userData.is_banned ? (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={userData.is_admin || isLoading}
+                          onClick={() => handleBanUser(userData.id, userData.username)}
+                        >
+                          🚫 Ban User
+                        </Button>
+                      ) : (
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => handleUnbanUser(userData.id, userData.username)}
+                          disabled={isLoading}
+                        >
+                          ✅ Unban User
+                        </Button>
+                      )}
+                      {!userData.is_admin && (
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          onClick={() => handleDeleteUser(userData.id, userData.username)}
+                          disabled={isLoading}
+                        >
+                          🗑️ Delete User
+                        </Button>
+                      )}
                     </div>
-                  </div>
-                  <div className="flex flex-col space-y-2 ml-4">
-                    <div className="flex space-x-2">
-                      <Button size="sm" variant="outline" onClick={() => handleAddCoins(username, 1000)}>
-                        +1000 ₵
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleAddChips(username, 1000)}>
-                        +1000 💰
-                      </Button>
-                    </div>
-                    {!userData.banned ? (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={userData.isAdmin}
-                        onClick={() => handleBanUser(username)}
-                      >
-                        🚫 Ban User
-                      </Button>
-                    ) : (
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => handleUnbanUser(username)}
-                      >
-                        ✅ Unban User
-                      </Button>
-                    )}
-                    {!userData.isAdmin && (
-                      <Button 
-                        size="sm" 
-                        variant="destructive"
-                        onClick={() => handleDeleteUser(username)}
-                      >
-                        🗑️ Delete User
-                      </Button>
-                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
 
-          {pendingChanges && (
-            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold text-yellow-800">Unsaved Changes</h3>
-                  <p className="text-sm text-yellow-700">You have made changes that need to be saved. The page will reload to apply changes.</p>
-                </div>
-                <div className="flex space-x-2">
-                  <Button variant="outline" size="sm" onClick={handleCancelChanges}>
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={handleSaveChanges} className="bg-green-600 hover:bg-green-700">
-                    Save Changes
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+          
         </CardContent>
       </Card>
     );
@@ -857,15 +909,17 @@ const AdminPanel = () => {
               <div className="grid grid-cols-2 gap-4">
                 <Button
                   variant="outline"
-                  onClick={() => handleAddCoins(currentUser.username, 10000)}
+                  onClick={() => handleAddCoins(currentUser.id, currentUser.username, 10000)}
                   className="bg-green-50 hover:bg-green-100 border-green-200"
+                  disabled={isLoading}
                 >
                   Give Myself 10,000 ₵ Checkels
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => handleAddChips(currentUser.username, 10000)}
+                  onClick={() => handleAddChips(currentUser.id, currentUser.username, 10000)}
                   className="bg-purple-50 hover:bg-purple-100 border-purple-200"
+                  disabled={isLoading}
                 >
                   Give Myself 10,000 Chips
                 </Button>
@@ -877,52 +931,77 @@ const AdminPanel = () => {
               <div className="space-y-3">
                 <Button
                   variant="destructive"
-                  onClick={() => {
-                    Object.keys(users).forEach(username => {
-                      if (!users[username].isAdmin) {
-                        localStorage.removeItem(`tree_transactions_${username}`);
-                        localStorage.removeItem(`transactions_${username}`);
-                        localStorage.removeItem(`tree_generation_${username}`);
+                  onClick={async () => {
+                    if (!confirm("This will reset ALL non-admin users' balances to 0. Continue?")) return;
+                    
+                    try {
+                      setIsLoading(true);
+                      const { resetUserBalance, addTransaction } = await import('@/lib/database');
+                      
+                      let resetCount = 0;
+                      // Reset all non-admin users
+                      for (const user of users) {
+                        if (!user.is_admin) {
+                          try {
+                            console.log(`Resetting balance for user: ${user.username} (${user.id})`);
+                            await resetUserBalance(user.id);
+                            
+                            // Add transaction record
+                            await addTransaction({
+                              user_id: user.id,
+                              type: 'topup',
+                              description: `Admin mass balance reset by ${currentUser.username}`,
+                              coins_amount: 0,
+                              chips_amount: 0
+                            });
+                            
+                            resetCount++;
+                          } catch (userError) {
+                            console.error(`Failed to reset user ${user.username}:`, userError);
+                          }
+                        }
                       }
-                    });
-                    toast({
-                      title: "System Reset",
-                      description: "All non-admin transaction histories cleared",
-                    });
+                      
+                      await loadUsersFromSupabase();
+                      
+                      toast({
+                        title: "Economy Reset",
+                        description: `${resetCount} non-admin accounts reset to 0 balance`,
+                      });
+                    } catch (error: any) {
+                      console.error('Error in mass reset:', error);
+                      toast({
+                        title: "Error",
+                        description: error.message || "Failed to reset user accounts",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setIsLoading(false);
+                    }
                   }}
                   className="w-full"
+                  disabled={isLoading}
                 >
-                  🗑️ Clear All User Transactions
+                  💥 Reset All User Balances
                 </Button>
                 <Button
                   variant="destructive"
                   onClick={() => {
-                    const updatedUsers = { ...users };
-                    Object.keys(updatedUsers).forEach(username => {
-                      if (!updatedUsers[username].isAdmin) {
-                        updatedUsers[username].activeBoosters = [];
-                        updatedUsers[username].coins = 0;
-                        updatedUsers[username].chips = 0;
-                        updatedUsers[username].upgrades = { treeLevel: 1 };
-                      }
-                    });
-                    localStorage.setItem('casinoUsers', JSON.stringify(updatedUsers));
-                    setUsers(updatedUsers);
+                    // Clear localStorage data but keep the main user session
+                    const currentUserData = localStorage.getItem('casinoUser');
+                    localStorage.clear();
+                    if (currentUserData) {
+                      localStorage.setItem('casinoUser', currentUserData);
+                    }
+                    
                     toast({
-                      title: "Economy Reset",
-                      description: "All non-admin accounts reset",
+                      title: "LocalStorage Cleared",
+                      description: "Local cache cleared (user session preserved)",
                     });
                   }}
                   className="w-full"
                 >
-                  💥 Reset All User Accounts
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={clearAllLocalStorageData}
-                  className="w-full"
-                >
-                  💣 Clear All LocalStorage Data
+                  🧹 Clear Local Cache
                 </Button>
               </div>
             </div>

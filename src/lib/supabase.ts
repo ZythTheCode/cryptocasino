@@ -1,14 +1,23 @@
-
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables. Please check your .env file.')
+  console.error('Missing Supabase environment variables:', {
+    url: !!supabaseUrl,
+    key: !!supabaseAnonKey
+  });
+
+  // Don't throw immediately, let the app load but show clear error messages
+  console.warn('🚨 Supabase will not work without proper environment variables!');
+  console.warn('Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your Secrets in Replit');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Create client even if env vars are missing (will fail gracefully)
+export const supabase = supabaseUrl && supabaseAnonKey 
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 // Database types
 export interface User {
@@ -20,6 +29,7 @@ export interface User {
   chips: number
   created_at: string
   updated_at: string
+  is_banned?: boolean
 }
 
 export interface TreeUpgrade {

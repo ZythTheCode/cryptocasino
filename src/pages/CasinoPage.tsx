@@ -628,6 +628,7 @@ const AdminPanel = () => {
 const TransactionHistory = ({ user }: any) => {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
 
   useEffect(() => {
     const loadTransactions = async () => {

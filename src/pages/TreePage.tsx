@@ -61,11 +61,8 @@ const TreePage = () => {
       if (savedUser) {
         const userData = JSON.parse(savedUser);
         
-        // Set user immediately with localStorage data
-        setUser(userData);
-        
-        // Try to sync with Supabase to get latest data
         try {
+          // Always get fresh data from Supabase
           const freshUser = await signIn(userData.username, userData.password_hash || 'migrated_user');
           
           // Load tree upgrade data from Supabase
@@ -89,48 +86,9 @@ const TreePage = () => {
           localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
           setUser(updatedUser);
         } catch (error) {
-          console.log('Using localStorage data, Supabase sync failed:', error);
-          // Ensure user has required fields for tree
-          const userWithDefaults = {
-            ...userData,
-            coins: userData.coins || 0,
-            chips: userData.chips || 0,
-            isAdmin: userData.isAdmin || userData.is_admin || false
-          };
-          setUser(userWithDefaults);
-          localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
-          
-          // Try to load tree upgrade from localStorage as fallback
-          const savedTreeUpgrade = localStorage.getItem(`tree_${userData.username}`);
-          if (savedTreeUpgrade) {
-            const treeData = JSON.parse(savedTreeUpgrade);
-            setTreeUpgrade({
-              id: userData.id,
-              user_id: userData.id,
-              tree_level: treeData.treeLevel || 1,
-              last_claim: treeData.lastClaim || new Date().toISOString(),
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            });
-          }
-        }ata.chips || 0,
-            upgrades: userData.upgrades || { treeLevel: 1 },
-            activeBoosters: userData.activeBoosters || []
-          };
-          
-          // Create a fallback tree upgrade object
-          const fallbackTreeUpgrade = {
-            id: 'local',
-            user_id: userData.id || 'local',
-            tree_level: userWithDefaults.upgrades.treeLevel,
-            last_claim: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          };
-          
-          setTreeUpgrade(fallbackTreeUpgrade);
-          setUser(userWithDefaults);
-          localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
+          console.error('Failed to load from Supabase:', error);
+          // Redirect to login if Supabase fails
+          window.location.href = "/";
         }
       } else {
         // Redirect to home if no user data
@@ -300,91 +258,52 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
 
   const finalCPS = baseCPS * totalMultiplier;
 
-  // Load generation state on mount and calculate offline generation (fixed offline generation)
+  // Calculate offline generation based on last_claim from Supabase
   useEffect(() => {
-    const loadGenerationState = () => {
-      const savedGenerationState = localStorage.getItem(
-        `tree_generation_${user?.username}`,
-      );
+    const calculateOfflineGeneration = () => {
+      if (!treeUpgrade) return;
       
-      if (savedGenerationState && treeUpgrade) {
-        const state = JSON.parse(savedGenerationState);
-        const savedLastClaimTime = state.lastClaimTime || Date.now();
-        const savedCurrentCheckels = state.currentCheckels || 0;
-        const wasGenerationActive = state.generationActive !== false;
+      const lastClaimTime = new Date(treeUpgrade.last_claim).getTime();
+      const currentTime = Date.now();
+      const timeOfflineSeconds = (currentTime - lastClaimTime) / 1000;
+      
+      setLastClaimTime(lastClaimTime);
+      
+      if (timeOfflineSeconds > 0) {
+        const currentMaxGenerationTime = calculateMaxGenerationTime(level);
+        const maxOfflineTime = Math.min(timeOfflineSeconds, currentMaxGenerationTime);
         
-        // Calculate offline generation
-        const currentTime = Date.now();
-        const timeOfflineMs = currentTime - savedLastClaimTime;
-        const timeOfflineSeconds = timeOfflineMs / 1000;
+        // Calculate offline generation with current level's CPS
+        const currentBaseCPS = calculateBaseCPS(level);
+        const offlineGeneration = currentBaseCPS * maxOfflineTime;
         
-        if (wasGenerationActive && timeOfflineSeconds > 0) {
-          // Use the max generation time from the current tree level
-          const currentMaxGenerationTime = calculateMaxGenerationTime(level);
-          const maxOfflineTime = Math.min(timeOfflineSeconds, currentMaxGenerationTime);
-          
-          // Calculate offline generation with current level's CPS and any active boosters at time of loading
-          const currentBaseCPS = calculateBaseCPS(level);
-          const currentValidBoosters = (user?.activeBoosters || []).filter(
-            (booster: any) => currentTime < booster.endTime,
-          );
-          const currentTotalMultiplier = currentValidBoosters.reduce(
-            (total: number, booster: any) => total * booster.multiplier,
-            1,
-          );
-          const currentFinalCPS = currentBaseCPS * currentTotalMultiplier;
-          
-          const offlineGeneration = currentFinalCPS * maxOfflineTime;
-          const totalCheckels = savedCurrentCheckels + offlineGeneration;
-          
-          setCurrentCheckels(totalCheckels);
-          setAccumulatedCheckels(offlineGeneration);
-          
-          // Check if generation should stop (exceeded max time)
-          const shouldStopGeneration = timeOfflineSeconds >= currentMaxGenerationTime;
-          setGenerationActive(!shouldStopGeneration);
-          
-          if (offlineGeneration > 0) {
-            toast({
-              title: "Welcome back!",
-              description: `Your tree generated ${offlineGeneration.toFixed(3)} ₵ Checkels while you were away! ${shouldStopGeneration ? 'Generation stopped at max duration.' : ''}`,
-            });
-          }
-        } else {
-          setCurrentCheckels(savedCurrentCheckels);
-          setGenerationActive(timeOfflineSeconds < calculateMaxGenerationTime(level));
+        setCurrentCheckels(offlineGeneration);
+        setAccumulatedCheckels(offlineGeneration);
+        
+        // Check if generation should stop (exceeded max time)
+        const shouldStopGeneration = timeOfflineSeconds >= currentMaxGenerationTime;
+        setGenerationActive(!shouldStopGeneration);
+        
+        if (offlineGeneration > 0) {
+          toast({
+            title: "Welcome back!",
+            description: `Your tree generated ${offlineGeneration.toFixed(3)} ₵ Checkels while you were away! ${shouldStopGeneration ? 'Generation stopped at max duration.' : ''}`,
+          });
         }
-        
-        setLastClaimTime(savedLastClaimTime);
       } else {
-        // Initialize for first time
-        const currentTime = Date.now();
-        setLastClaimTime(currentTime);
         setCurrentCheckels(0);
         setGenerationActive(true);
       }
     };
 
-    if (user?.username && treeUpgrade) {
-      loadGenerationState();
+    if (treeUpgrade) {
+      calculateOfflineGeneration();
     }
-  }, [user?.username, treeUpgrade, level]);
+  }, [treeUpgrade, level]);
 
-  const saveGenerationState = () => {
-    if (user?.username) {
-      const state = {
-        currentCheckels,
-        lastClaimTime,
-        generationActive,
-      };
-      localStorage.setItem(
-        `tree_generation_${user.username}`,
-        JSON.stringify(state),
-      );
-    }
-  };
+  
 
-  // Real-time generation effect (fixed booster application)
+  // Real-time generation effect
   useEffect(() => {
     if (!generationActive) return;
 
@@ -398,23 +317,16 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       } else {
         setGenerationActive(false);
       }
-
-      saveGenerationState();
     }, 1000);
 
     return () => clearInterval(interval);
   }, [
     lastClaimTime,
-    finalCPS, // This now includes boosters
+    finalCPS,
     maxGenerationTime,
     currentCheckels,
     generationActive,
   ]);
-
-  // Save state when important values change
-  useEffect(() => {
-    saveGenerationState();
-  }, [currentCheckels, lastClaimTime, generationActive]);
 
   const claimCheckels = async () => {
     if (currentCheckels === 0) {
@@ -451,22 +363,11 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       });
     } catch (error) {
       console.error('Error adding transaction to Supabase:', error);
-      // Fallback to localStorage transaction
-      const transaction = {
-        type: "claim",
-        amount: finalCheckels,
-        timestamp: Date.now(),
-        description: "Claimed Checkels from tree",
-      };
-
-      const transactions = JSON.parse(
-        localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
-      );
-      transactions.unshift(transaction);
-      localStorage.setItem(
-        `tree_transactions_${user.username}`,
-        JSON.stringify(transactions.slice(0, 50)),
-      );
+      toast({
+        title: "Warning",
+        description: "Transaction not recorded due to database error",
+        variant: "destructive",
+      });
     }
 
     // Reset generation state and update tree upgrade's last_claim time
@@ -865,22 +766,11 @@ const BoosterStore = ({ user, setUser, updateUserAndSync }: any) => {
       });
     } catch (error) {
       console.error('Error adding transaction to Supabase:', error);
-      // Fallback to localStorage transaction
-      const transaction = {
-        type: "booster",
-        amount: -booster.cost,
-        timestamp: Date.now(),
-        description: `Purchased ${booster.name}`,
-      };
-
-      const transactions = JSON.parse(
-        localStorage.getItem(`tree_transactions_${user.username}`) || "[]",
-      );
-      transactions.unshift(transaction);
-      localStorage.setItem(
-        `tree_transactions_${user.username}`,
-        JSON.stringify(transactions.slice(0, 50)),
-      );
+      toast({
+        title: "Warning",
+        description: "Transaction not recorded due to database error",
+        variant: "destructive",
+      });
     }
 
     toast({
@@ -964,10 +854,9 @@ const TransactionHistory = ({ user }: any) => {
     const loadTransactions = async () => {
       if (user?.id) {
         try {
-          // Try to load from Supabase first
           const supabaseTransactions = await getUserTransactions(user.id, 50);
           
-          // Format Supabase transactions to match localStorage format
+          // Format Supabase transactions for display
           const formattedTransactions = supabaseTransactions.map((tx: any) => ({
             type: tx.type,
             amount: tx.coins_amount || tx.amount || 0,
@@ -978,11 +867,7 @@ const TransactionHistory = ({ user }: any) => {
           setTransactions(formattedTransactions);
         } catch (error) {
           console.error('Error loading transactions from Supabase:', error);
-          // Fallback to localStorage
-          const savedTransactions = localStorage.getItem(
-            `tree_transactions_${user.username}`,
-          );
-          setTransactions(savedTransactions ? JSON.parse(savedTransactions) : []);
+          setTransactions([]);
         }
       }
     };
