@@ -1,15 +1,15 @@
-
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Coins, DollarSign, Home, Gamepad2, Wallet, Users, Leaf } from "lucide-react";
+import { Coins, DollarSign, Home, Gamepad2, Wallet, Users, Leaf, Menu, LogOut } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { signIn, updateUserBalance, addTransaction, updateTreeUpgrade, createTreeUpgrade, getTreeUpgrade, getUserTransactions, saveTreeState, clearOfflineGeneration } from '@/lib/database';
 import { TreePine, ShoppingCart, Zap, Star, TrendingUp, History } from "lucide-react";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { supabase } from '@/lib/supabase';
+import MobileNavigation from "@/components/MobileNavigation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +20,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 const calculateTreeLevel = (upgrades: any) => {
   if (!upgrades) return 1;
@@ -83,6 +91,12 @@ const TreePage = () => {
       const parsedUser = JSON.parse(savedUser);
 
       try {
+        // Show loading message first
+        toast({
+          title: "Loading Tree Farm",
+          description: "Syncing with database...",
+        });
+
         const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
 
         if (freshUser.is_banned) {
@@ -99,27 +113,31 @@ const TreePage = () => {
         localStorage.setItem('casinoUser', JSON.stringify(freshUser));
         setUser(freshUser);
 
-        toast({
-          title: "Tree Farm Loaded",
-          description: `Welcome back to your money tree, ${freshUser.username}!`,
-        });
+        // Wait a bit for tree data to load
+        setTimeout(() => {
+          toast({
+            title: "Tree Farm Ready! 🌱",
+            description: `Welcome back to your money tree, ${freshUser.username}!`,
+          });
+        }, 1000);
       } catch (error) {
         console.log('Failed to load user from Supabase:', error);
         toast({
           title: "Connection Error",
-          description: "Failed to sync with database. Redirecting to login.",
+          description: "Failed to sync with database. Using offline mode.",
           variant: "destructive",
         });
-        localStorage.removeItem('casinoUser');
-        setTimeout(() => navigate('/'), 2000);
+        // Don't remove user, allow offline mode
+        setUser(parsedUser);
       } finally {
         setIsLoading(false);
-        setPageLoading(false);
+        // Add extra time for data synchronization
+        setTimeout(() => setPageLoading(false), 1500);
       }
     };
 
     loadUser();
-  }, [navigate]);
+  }, [navigate, toast]);
 
   const updateUserAndSync = async (updatedUserData: any) => {
     try {
@@ -148,7 +166,7 @@ const TreePage = () => {
   useEffect(() => {
     const loadTreeData = async () => {
         if (!user?.id) return;
-        
+
         try {
             let upgrade = await getTreeUpgrade(user.id);
             if (!upgrade) {
@@ -160,7 +178,7 @@ const TreePage = () => {
             // Load persisted boosters from localStorage
             const savedBoosters = localStorage.getItem(`activeBoosters_${user.id}`);
             let activeBoosters = [];
-            
+
             if (savedBoosters) {
                 const parsedBoosters = JSON.parse(savedBoosters);
                 // Filter out expired boosters
@@ -302,8 +320,9 @@ const TreePage = () => {
               Money Tree Farm
             </span>
           </h1>
+
           <div className="flex items-center space-x-6">
-            <div className="flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
+            <div className="hidden md:flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
               <div className="flex items-center space-x-2">
                 <CheckelsIcon className="w-5 h-5 text-yellow-400" />
                 <span className="text-yellow-100 font-semibold">
@@ -318,13 +337,14 @@ const TreePage = () => {
                 </span>
               </div>
             </div>
+            
             <div className="flex items-center space-x-3">
-              <span className="text-white/90 font-medium">Welcome, {user?.username}</span>
-              <div className="flex space-x-2">
+              <span className="hidden md:block text-white/90 font-medium">Welcome, {user?.username}</span>
+              <div className="hidden md:flex space-x-2">
                 <Link to="/">
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
                     className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30"
                   >
                     <Home className="w-4 h-4" />
@@ -332,9 +352,9 @@ const TreePage = () => {
                   </Button>
                 </Link>
                 <Link to="/casino">
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
                     className="flex items-center space-x-2 bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30"
                   >
                     <Gamepad2 className="w-4 h-4" />
@@ -342,9 +362,9 @@ const TreePage = () => {
                   </Button>
                 </Link>
                 <Link to="/wallet">
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
                     className="flex items-center space-x-2 bg-indigo-500/20 border-indigo-400/30 text-indigo-100 hover:bg-indigo-500/30"
                   >
                     <Wallet className="w-4 h-4" />
@@ -352,6 +372,8 @@ const TreePage = () => {
                   </Button>
                 </Link>
               </div>
+              
+              <MobileNavigation user={user} currentPage="/tree" />
             </div>
           </div>
         </div>
@@ -375,7 +397,9 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
   const [generationActive, setGenerationActive] = useState(true);
   const [offlineGenerated, setOfflineGenerated] = useState(0);
   const [showClaimDialog, setShowClaimDialog] = useState(false);
+  const [currentTime, setCurrentTime] = useState(Date.now());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const hasCalculatedOffline = useRef(false);
 
   const level = calculateTreeLevel(treeUpgrade);
@@ -413,56 +437,87 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
   useEffect(() => {
     const calculateOfflineGeneration = async () => {
       if (!treeUpgrade || !user?.id || hasCalculatedOffline.current) return;
-      
+
       hasCalculatedOffline.current = true;
 
-      // Check if there was offline generation
-      if (treeUpgrade.offline_generation_active && treeUpgrade.last_leave_time) {
-        const leaveTime = new Date(treeUpgrade.last_leave_time).getTime();
-        const returnTime = Date.now();
-        const timeOfflineSeconds = Math.max(0, (returnTime - leaveTime) / 1000);
+      // Check for saved tree state in localStorage
+      const savedTreeState = localStorage.getItem(`treeState_${user.id}`);
 
-        if (timeOfflineSeconds > 30) { // Only if offline for more than 30 seconds
-          // Cap the offline time to max generation duration
-          const cappedOfflineTime = Math.min(timeOfflineSeconds, maxGenerationTime);
-          
-          // Calculate offline generation with current level's CPS
-          const offlineGeneration = calculateBaseCPS(level) * cappedOfflineTime;
-          
-          // Add any saved current checkels
-          const totalCheckels = (treeUpgrade.current_checkels || 0) + offlineGeneration;
-          
-          setCurrentCheckels(totalCheckels);
-          setOfflineGenerated(offlineGeneration);
-          setLastClaimTime(returnTime - (timeOfflineSeconds - cappedOfflineTime) * 1000); // Adjust last claim time
+      if (savedTreeState) {
+        try {
+          const parsedState = JSON.parse(savedTreeState);
+          const leaveTime = new Date(parsedState.last_leave_time).getTime();
+          const returnTime = Date.now();
+          const timeOfflineSeconds = Math.max(0, (returnTime - leaveTime) / 1000);
 
-          // Determine if generation should continue (only if we haven't exceeded max time)
-          const shouldContinueGeneration = cappedOfflineTime < maxGenerationTime;
-          setGenerationActive(shouldContinueGeneration);
+          if (timeOfflineSeconds > 5) { // Only if offline for more than 5 seconds
+            // Get the original session start time
+            const originalSessionStart = parsedState.session_start_time ? 
+              new Date(parsedState.session_start_time).getTime() : 
+              new Date(treeUpgrade.last_claim).getTime();
 
-          // Show offline generation notification
-          if (offlineGeneration > 0) {
-            toast({
-              title: "Welcome back!",
-              description: `Your tree generated ${offlineGeneration.toFixed(4)} ₵ Checkels while you were away! ${!shouldContinueGeneration ? 'Generation stopped at max duration.' : ''}`,
-            });
+            // Calculate total time elapsed since session started (including offline time)
+            const totalElapsedTime = (returnTime - originalSessionStart) / 1000;
+
+            // Cap total time to max generation duration
+            const cappedTotalTime = Math.min(totalElapsedTime, maxGenerationTime);
+
+            // Calculate offline generation with current level's CPS
+            const offlineGeneration = calculateBaseCPS(level) * timeOfflineSeconds;
+
+            // Add any saved current checkels
+            const totalCheckels = (parsedState.current_checkels || 0) + offlineGeneration;
+
+            setCurrentCheckels(totalCheckels);
+            setOfflineGenerated(offlineGeneration);
+            
+            // Set last claim time to maintain the total elapsed time continuity
+            const adjustedClaimTime = returnTime - (cappedTotalTime * 1000);
+            setLastClaimTime(adjustedClaimTime);
+
+            // Determine if generation should continue
+            const shouldContinueGeneration = cappedTotalTime < maxGenerationTime;
+            setGenerationActive(shouldContinueGeneration);
+
+            // Show offline generation notification
+            if (offlineGeneration > 0) {
+              toast({
+                title: "Welcome back!",
+                description: `Your tree generated ${offlineGeneration.toFixed(4)} ₵ Checkels while you were away! Timer: ${formatDuration(Math.floor(cappedTotalTime))}/${formatDuration(maxGenerationTime)} ${!shouldContinueGeneration ? 'Generation complete.' : ''}`,
+              });
+            }
+
+            // Clear offline generation flag
+            try {
+              await clearOfflineGeneration(user.id);
+            } catch (error) {
+              console.error('Error clearing offline generation:', error);
+            }
+          } else {
+            // Short absence, restore saved state with original timing
+            const originalSessionStart = parsedState.session_start_time ? 
+              new Date(parsedState.session_start_time).getTime() : 
+              new Date(treeUpgrade.last_claim).getTime();
+
+            const totalElapsedTime = (returnTime - originalSessionStart) / 1000;
+            const cappedTotalTime = Math.min(totalElapsedTime, maxGenerationTime);
+            const adjustedClaimTime = returnTime - (cappedTotalTime * 1000);
+
+            setCurrentCheckels(parsedState.current_checkels || 0);
+            setLastClaimTime(adjustedClaimTime);
+            setGenerationActive(cappedTotalTime < maxGenerationTime);
           }
-
-          // Clear offline generation flag
-          try {
-            await clearOfflineGeneration(user.id);
-          } catch (error) {
-            console.error('Error clearing offline generation:', error);
-          }
-        } else {
-          // Short absence, restore saved state
-          setCurrentCheckels(treeUpgrade.current_checkels || 0);
-          setLastClaimTime(new Date(treeUpgrade.last_leave_time).getTime());
+        } catch (error) {
+          console.error('Error parsing saved tree state:', error);
+          // Fall back to fresh start
+          setCurrentCheckels(0);
+          setOfflineGenerated(0);
+          setLastClaimTime(treeUpgrade.last_claim ? new Date(treeUpgrade.last_claim).getTime() : Date.now());
           setGenerationActive(true);
         }
       } else {
-        // No offline generation, start fresh or restore saved checkels
-        setCurrentCheckels(treeUpgrade.current_checkels || 0);
+        // No saved state, start fresh
+        setCurrentCheckels(0);
         setOfflineGenerated(0);
         setLastClaimTime(treeUpgrade.last_claim ? new Date(treeUpgrade.last_claim).getTime() : Date.now());
         setGenerationActive(true);
@@ -473,6 +528,19 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       calculateOfflineGeneration();
     }
   }, [treeUpgrade, level, toast, user?.id, maxGenerationTime]);
+
+  // Real-time timer update
+  useEffect(() => {
+    timerRef.current = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, []);
 
   // Real-time generation timer
   useEffect(() => {
@@ -495,7 +563,6 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
         toast({
           title: "Generation Complete",
           description: `Your tree has reached maximum generation time. Claim your Checkels to restart!`,
-          variant: "default",
         });
       }
     }, 1000);
@@ -519,8 +586,18 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
   // Save state when leaving
   useEffect(() => {
     const saveCurrentState = async () => {
-      if (user?.id && currentCheckels > 0) {
+      if (user?.id) {
         try {
+          // Save state with session start time for proper timer continuity
+          const treeState = {
+            current_checkels: currentCheckels,
+            last_leave_time: new Date().toISOString(),
+            session_start_time: new Date(lastClaimTime).toISOString(),
+            offline_generation_active: true
+          };
+          
+          localStorage.setItem(`treeState_${user.id}`, JSON.stringify(treeState));
+          
           await saveTreeState(user.id, currentCheckels, new Date());
         } catch (error) {
           console.error('Error saving tree state:', error);
@@ -541,7 +618,7 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user?.id, currentCheckels]);
+  }, [user?.id, currentCheckels, lastClaimTime]);
 
   const handleClaimClick = () => {
     if (currentCheckels === 0) {
@@ -593,11 +670,12 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
     setLastClaimTime(newClaimTime);
     setGenerationActive(true);
 
+    // Clear saved tree state since we're starting fresh
+    localStorage.removeItem(`treeState_${user.id}`);
+
     try {
       const updatedTreeUpgrade = await updateTreeUpgrade(user.id, {
-        last_claim: new Date(newClaimTime).toISOString(),
-        current_checkels: 0,
-        offline_generation_active: false
+        last_claim: new Date(newClaimTime).toISOString()
       });
       setTreeUpgrade(updatedTreeUpgrade);
     } catch (error) {
@@ -681,13 +759,13 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
             <div className="text-center p-2 bg-blue-50 rounded">
               <p className="text-sm font-medium text-blue-700">Generation Timer</p>
               <p className="text-xs text-blue-600">
-                {formatDuration(Math.floor((Date.now() - lastClaimTime) / 1000))} / {formatDuration(maxGenerationTime)}
+                {formatDuration(Math.floor((currentTime - lastClaimTime) / 1000))} / {formatDuration(maxGenerationTime)}
               </p>
               <div className="w-full bg-blue-200 rounded-full h-1.5 mt-1">
                 <div 
                   className="bg-blue-600 h-1.5 rounded-full transition-all duration-1000"
                   style={{ 
-                    width: `${Math.min(100, ((Date.now() - lastClaimTime) / 1000 / maxGenerationTime) * 100)}%` 
+                    width: `${Math.min(100, ((currentTime - lastClaimTime) / 1000 / maxGenerationTime) * 100)}%` 
                   }}
                 ></div>
               </div>
@@ -761,7 +839,7 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
 const TreeLevelingCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserAndSync }: any) => {
   const { toast } = useToast();
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
-  
+
   const currentLevel = calculateTreeLevel(treeUpgrade);
   const nextLevel = currentLevel + 1;
   const upgradeCost = calculateLevelUpCost(currentLevel);
@@ -1212,7 +1290,7 @@ const TransactionHistory = ({ user }: any) => {
               payload.new?.description?.includes('Upgraded tree') ||
               payload.new?.description?.includes('booster') ||
               payload.new?.description?.includes('Purchased')) {
-            
+
             if (payload.eventType === 'INSERT') {
               const newTransaction = {
                 id: payload.new.id,
@@ -1221,7 +1299,7 @@ const TransactionHistory = ({ user }: any) => {
                 timestamp: new Date(payload.new.created_at).getTime(),
                 description: payload.new.description
               };
-              
+
               setTransactions(prev => [newTransaction, ...prev].slice(0, 50));
             } else if (payload.eventType === 'UPDATE') {
               setTransactions(prev => 

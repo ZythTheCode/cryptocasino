@@ -1,5 +1,8 @@
+The code is modified to include real-time updates and auto-refresh functionality for transaction history using Supabase.
+```
 
-import { useState, useEffect } from "react";
+```replit_final_file
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DollarSign } from "lucide-react";
 import { getUserTransactions } from "@/lib/database";
@@ -16,6 +19,7 @@ const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: Transac
   const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const filterTransactions = (transactions: any[], type: string) => {
     switch (type) {
@@ -42,7 +46,7 @@ const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: Transac
 
   const loadTransactions = async () => {
     if (!user?.id) return;
-    
+
     try {
       setIsLoading(true);
       const dbTransactions = await getUserTransactions(user.id, maxItems);
@@ -75,55 +79,69 @@ const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: Transac
     if (user?.id) {
       loadTransactions();
     }
-  }, [user?.id, filterType, maxItems]);
 
-  useEffect(() => {
-    if (!user?.id || !supabase) return;
+    // Set up auto-refresh every 10 seconds
+    refreshIntervalRef.current = setInterval(() => {
+      if (user?.id) {
+        loadTransactions();
+      }
+    }, 10000);
 
-    // Set up real-time subscription for transactions
-    const subscription = supabase
-      .channel(`transactions_realtime_${filterType}_${user.id}_${Date.now()}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'transactions',
-        filter: `user_id=eq.${user.id}`
-      }, (payload) => {
-        console.log(`${filterType} transaction change detected:`, payload);
+    // Set up real-time subscription for immediate updates
+    if (user?.id && supabase) {
+      const subscription = supabase
+        .channel(`transactions_realtime_${filterType}_${user.id}_${Date.now()}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${user.id}`
+        }, (payload) => {
+          console.log(`${filterType} transaction change detected:`, payload);
 
-        if (payload.eventType === 'INSERT' && payload.new) {
-          // Check if this transaction should be included in our filter
-          const shouldInclude = filterTransactions([payload.new], filterType).length > 0;
+          if (payload.eventType === 'INSERT' && payload.new) {
+            // Check if this transaction should be included in our filter
+            const shouldInclude = filterTransactions([payload.new], filterType).length > 0;
 
-          if (shouldInclude) {
-            const newTransaction = {
-              ...payload.new,
-              timestamp: new Date(payload.new.created_at).getTime(),
-              description: payload.new.description || `${payload.new.type} transaction`
-            };
-
-            setTransactions(prev => [newTransaction, ...prev].slice(0, maxItems));
-          }
-        } else if (payload.eventType === 'UPDATE' && payload.new) {
-          // Check if this transaction should be included in our filter
-          const shouldInclude = filterTransactions([payload.new], filterType).length > 0;
-
-          if (shouldInclude) {
-            setTransactions(prev => 
-              prev.map(tx => tx.id === payload.new.id ? {
-                ...tx,
+            if (shouldInclude) {
+              const newTransaction = {
                 ...payload.new,
                 timestamp: new Date(payload.new.created_at).getTime(),
                 description: payload.new.description || `${payload.new.type} transaction`
-              } : tx)
-            );
+              };
+
+              setTransactions(prev => [newTransaction, ...prev].slice(0, maxItems));
+            }
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            // Check if this transaction should be included in our filter
+            const shouldInclude = filterTransactions([payload.new], filterType).length > 0;
+
+            if (shouldInclude) {
+              setTransactions(prev => 
+                prev.map(tx => tx.id === payload.new.id ? {
+                  ...tx,
+                  ...payload.new,
+                  timestamp: new Date(payload.new.created_at).getTime(),
+                  description: payload.new.description || `${payload.new.type} transaction`
+                } : tx)
+              );
+            }
           }
+        })
+        .subscribe();
+
+      return () => {
+        if (refreshIntervalRef.current) {
+          clearInterval(refreshIntervalRef.current);
         }
-      })
-      .subscribe();
+        supabase.removeChannel(subscription);
+      };
+    }
 
     return () => {
-      supabase.removeChannel(subscription);
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current);
+      }
     };
   }, [user?.id, filterType, maxItems]);
 
@@ -197,3 +215,5 @@ const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: Transac
 };
 
 export default TransactionHistory;
+```The code has been updated to include real-time updates and periodic auto-refresh for transaction history, and useRef is used to manage the interval.
+```

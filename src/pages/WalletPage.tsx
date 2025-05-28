@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +29,7 @@ import { signIn, updateUserBalance, addTransaction, getUserTransactions, createT
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { supabase } from '@/lib/supabase';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import MobileNavigation from "@/components/MobileNavigation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,58 +45,70 @@ import {
 const WalletPage = () => {
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [convertAmount, setConvertAmount] = useState(0);
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const loadUserAndData = async () => {
-      setIsLoading(true);
-      const savedUser = localStorage.getItem("casinoUser");
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser);
+    const loadUserData = async () => {
+      const savedUser = localStorage.getItem('casinoUser');
+      if (!savedUser) {
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
 
-        try {
-          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+      const parsedUser = JSON.parse(savedUser);
 
-          if (freshUser.is_banned) {
-            toast({
-              title: "Account Banned",
-              description: "Your account has been banned. Redirecting to login.",
-              variant: "destructive",
-            });
-            localStorage.removeItem('casinoUser');
-            setTimeout(() => navigate('/'), 2000);
-            return;
-          }
+      try {
+        // Show loading message first
+        toast({
+          title: "Loading Wallet",
+          description: "Syncing with database...",
+        });
 
-          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-          setUser(freshUser);
-          loadTransactions(freshUser.id);
+        const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
 
+        if (freshUser.is_banned) {
           toast({
-            title: "Wallet Loaded 💳",
-            description: `Welcome to your wallet, ${freshUser.username}!`,
-          });
-
-        } catch (error) {
-          console.log('Failed to load user from Supabase:', error);
-          toast({
-            title: "Connection Error",
-            description: "Failed to sync with database. Redirecting to login.",
+            title: "Account Banned",
+            description: "Your account has been banned. Redirecting to login.",
             variant: "destructive",
           });
           localStorage.removeItem('casinoUser');
           setTimeout(() => navigate('/'), 2000);
+          return;
         }
-      } else {
-        navigate('/');
+
+        localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+        setUser(freshUser);
+
+        // Wait a bit for data to sync
+        setTimeout(() => {
+          toast({
+            title: "Wallet Ready! 💰",
+            description: `Welcome to your wallet, ${freshUser.username}!`,
+          });
+        }, 1000);
+      } catch (error) {
+        console.log('Failed to load user from Supabase:', error);
+        toast({
+          title: "Connection Error",
+          description: "Failed to sync with database. Using offline mode.",
+          variant: "destructive",
+        });
+        // Don't remove user, allow offline mode
+        setUser(parsedUser);
+      } finally {
+        setIsLoading(false);
+        // Add extra time for data synchronization
+        setTimeout(() => setPageLoading(false), 1500);
       }
-      setIsLoading(false);
     };
 
-    loadUserAndData();
-  }, [toast, navigate]);
+    loadUserData();
+  }, [navigate, toast]);
 
   const loadTransactions = async (userId: string) => {
     try {
@@ -149,7 +161,7 @@ const WalletPage = () => {
     }
   }, [user?.id]);
 
-  if (isLoading) {
+  if (isLoading || pageLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center">
         <div className="flex items-center space-x-2 text-white">
@@ -173,7 +185,7 @@ const WalletPage = () => {
             </span>
           </h1>
           <div className="flex items-center space-x-6">
-            <div className="flex items-center space-x-4 bg-black/20 rounded-full px-6 py-3 border border-white/10">
+            <div className="hidden md:flex items-center space-x-4 bg-black/20 rounded-full px-6 py-3 border border-white/10">
               <div className="flex items-center space-x-2">
                 <CheckelsIcon className="w-6 h-6 text-yellow-400" />
                 <span className="text-yellow-100 font-bold text-lg">
@@ -189,8 +201,8 @@ const WalletPage = () => {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <span className="text-white/90 font-medium">Welcome, {user?.username}</span>
-              <div className="flex space-x-2">
+              <span className="hidden md:block text-white/90 font-medium">Welcome, {user?.username}</span>
+              <div className="hidden md:flex space-x-2">
                 <Link to="/">
                   <Button variant="outline" size="sm" className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30">
                     <Home className="w-4 h-4" />
@@ -210,6 +222,8 @@ const WalletPage = () => {
                   </Button>
                 </Link>
               </div>
+
+              <MobileNavigation user={user} currentPage="/wallet" />
             </div>
           </div>
         </div>
@@ -238,7 +252,7 @@ const WalletPage = () => {
                       <CheckelsIcon className="w-16 h-16 text-yellow-400" />
                     </div>
                   </div>
-                  
+
                   <div className="bg-gradient-to-br from-green-500/20 to-emerald-500/20 p-6 rounded-xl border border-green-400/30">
                     <div className="flex items-center justify-between">
                       <div>

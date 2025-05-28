@@ -1,58 +1,97 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Gamepad2, DollarSign, Coins, Home, TreePine, Wallet, Settings } from "lucide-react";
-import { Link } from "react-router-dom";
-import SlotMachine from "@/components/games/SlotMachine";
-import Blackjack from "@/components/games/Blackjack";
-import Baccarat from "@/components/games/Baccarat";
-import ColorGame from "@/components/games/ColorGame";
-import Minebomb from "@/components/games/Minebomb";
-import { updateUserBalance, addTransaction, signIn } from "@/lib/database";
-import { supabase } from '@/lib/supabase'
+import { Coins, DollarSign, Home, Gamepad2, Wallet, Users, Menu, LogOut, Settings, TreePine } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { signIn, updateUserBalance, addTransaction } from '@/lib/database';
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { supabase } from '@/lib/supabase';
+import MobileNavigation from "@/components/MobileNavigation";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 const CasinoPage = () => {
   const [user, setUser] = useState<any>(null);
   const [selectedGame, setSelectedGame] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const loadUserData = async () => {
       const savedUser = localStorage.getItem('casinoUser');
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser);
+      if (!savedUser) {
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
 
-        // Set user immediately with localStorage data
-        setUser(parsedUser);
+      const parsedUser = JSON.parse(savedUser);
 
-        // Try to sync with Supabase to get latest data
-        try {
-          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
-          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-          setUser(freshUser);
-        } catch (error) {
-          console.log('Using localStorage data, Supabase sync failed:', error);
-          // Ensure user has required fields for casino
-          const userWithDefaults = {
-            ...parsedUser,
-            coins: parsedUser.coins || 0,
-            chips: parsedUser.chips || 0,
-            isAdmin: parsedUser.isAdmin || parsedUser.is_admin || false
-          };
-          setUser(userWithDefaults);
-          localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
+      try {
+        // Show loading message first
+        toast({
+          title: "Loading Casino",
+          description: "Syncing with database...",
+        });
+
+        const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+
+        if (freshUser.is_banned) {
+          toast({
+            title: "Account Banned",
+            description: "Your account has been banned. Redirecting to login.",
+            variant: "destructive",
+          });
+          localStorage.removeItem('casinoUser');
+          setTimeout(() => navigate('/'), 2000);
+          return;
         }
-      } else {
-        // Redirect to home if no user data
-        window.location.href = '/';
+
+        localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+        setUser(freshUser);
+
+        // Wait a bit for data to sync
+        setTimeout(() => {
+          toast({
+            title: "Casino Ready! 🎰",
+            description: `Welcome to the casino, ${freshUser.username}!`,
+          });
+        }, 1000);
+      } catch (error) {
+        console.log('Failed to load user from Supabase:', error);
+        toast({
+          title: "Connection Error",
+          description: "Failed to sync with database. Using offline mode.",
+          variant: "destructive",
+        });
+        // Don't remove user, allow offline mode
+        const userWithDefaults = {
+          ...parsedUser,
+          coins: parsedUser.coins || 0,
+          chips: parsedUser.chips || 0,
+          isAdmin: parsedUser.isAdmin || parsedUser.is_admin || false
+        };
+        setUser(userWithDefaults);
+        localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
+      } finally {
+        setIsLoading(false);
+        // Add extra time for data synchronization
+        setTimeout(() => setPageLoading(false), 1500);
       }
     };
 
     loadUserData();
-  }, []);
+  }, [navigate, toast]);
 
   const updateUser = async (updatedUser: any) => {
     try {
@@ -89,7 +128,19 @@ const CasinoPage = () => {
     }
   };
 
-  if (!user) {
+  if (isLoading || pageLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="flex items-center space-x-2 text-white">
+          <Gamepad2 className="w-6 h-6 animate-pulse text-purple-400" />
+          <div className="w-6 h-6 border-2 border-purple-400 border-t-transparent animate-spin rounded-full"></div>
+          <span>Loading Casino...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (user === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
         <Card>
@@ -130,6 +181,57 @@ const CasinoPage = () => {
       toast({
         title: "Error",
         description: "Failed to update chips. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleApproveTopUp = async (topUpId: string) => {
+    try {
+      const { updateTopupRequestStatus, getPendingTopupRequests } = await import('@/lib/database');
+      
+      await updateTopupRequestStatus(topUpId, 'approved', user.username);
+      
+      toast({
+        title: "Top-up Approved",
+        description: "Top-up request has been approved successfully",
+      });
+      
+      // Reload data to update UI
+      const pendingRequests = await getPendingTopupRequests();
+      // Update local state if needed
+      
+    } catch (error) {
+      console.error('Error approving top-up:', error);
+      toast({
+        title: "Error",
+        description: "Failed to approve top-up request",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRejectTopUp = async (topUpId: string) => {
+    try {
+      const { updateTopupRequestStatus, getPendingTopupRequests } = await import('@/lib/database');
+      
+      await updateTopupRequestStatus(topUpId, 'rejected', user.username);
+      
+      toast({
+        title: "Top-up Rejected",
+        description: "Top-up request has been rejected",
+        variant: "destructive",
+      });
+      
+      // Reload data to update UI
+      const pendingRequests = await getPendingTopupRequests();
+      // Update local state if needed
+      
+    } catch (error) {
+      console.error('Error rejecting top-up:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reject top-up request",
         variant: "destructive",
       });
     }
@@ -201,6 +303,8 @@ const CasinoPage = () => {
 };
 
 const CasinoHeader = ({ user }: any) => {
+  const navigate = useNavigate();
+
   return (
     <header className="bg-gradient-to-r from-purple-800/90 to-indigo-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
       <div className="max-w-7xl mx-auto flex justify-between items-center">
@@ -211,7 +315,7 @@ const CasinoHeader = ({ user }: any) => {
           </span>
         </h1>
         <div className="flex items-center space-x-6">
-          <div className="flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
+          <div className="hidden md:flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
             <div className="flex items-center space-x-2">
               <CheckelsIcon className="w-5 h-5 text-yellow-400" />
               <span className="text-yellow-100 font-semibold">
@@ -227,8 +331,8 @@ const CasinoHeader = ({ user }: any) => {
             </div>
           </div>
           <div className="flex items-center space-x-3">
-            <span className="text-white/90 font-medium">Welcome, {user?.username}</span>
-            <div className="flex space-x-2">
+            <span className="hidden md:block text-white/90 font-medium">Welcome, {user?.username}</span>
+            <div className="hidden md:flex space-x-2">
               <Link to="/">
                 <Button 
                   variant="outline" 
@@ -260,6 +364,8 @@ const CasinoHeader = ({ user }: any) => {
                 </Button>
               </Link>
             </div>
+
+            <MobileNavigation user={user} currentPage="/casino" />
           </div>
         </div>
       </div>
@@ -296,10 +402,10 @@ const ChipsWallet = ({ user }: any) => {
 
 const GameSelector = ({ selectedGame, onSelectGame }: any) => {
   const games = [
-    { id: 'color-game', name: 'Color Game', icon: '🎨', description: 'Filipino perya-style betting', available: true, bgColor: 'bg-red', available: true },
-    { id: 'blackjack', name: 'Blackjack', icon: '♠️', description: 'Classic card game', available: true, bgColor: 'bg-gray', available: true },
-    { id: 'slots', name: 'Slot Machine', icon: '🎰', description: 'Spin the reels', available: true, bgColor: 'bg-yellow', available: true },
-    { id: 'baccarat', name: 'Baccarat', icon: '🎴', description: 'High-stakes card game', available: true, bgColor: 'bg-blue', available: true },
+    { id: 'color-game', name: 'Color Game', icon: '🎨', description: 'Filipino perya-style betting', available: true, bgColor: 'bg-red' },
+    { id: 'blackjack', name: 'Blackjack', icon: '♠️', description: 'Classic card game', available: true, bgColor: 'bg-gray' },
+    { id: 'slots', name: 'Slot Machine', icon: '🎰', description: 'Spin the reels', available: true, bgColor: 'bg-yellow' },
+    { id: 'baccarat', name: 'Baccarat', icon: '🎴', description: 'High-stakes card game', available: true, bgColor: 'bg-blue' },
     { id: 'minebomb', name: 'Minebomb', icon: '💣', description: 'Avoid the bombs, cash out big!', bgColor: 'bg-orange', available: true },
   ];
 
@@ -626,5 +732,56 @@ const AdminPanel = () => {
 };
 
 import TransactionHistory from "@/components/TransactionHistory";
+
+// Placeholder components for missing games
+const ColorGame = ({ user, onUpdateUser, onAddTransaction }: any) => (
+  <Card className="h-full flex items-center justify-center">
+    <CardContent className="text-center p-8">
+      <div className="text-8xl mb-4">🎨</div>
+      <h2 className="text-3xl font-bold mb-2">Color Game</h2>
+      <p className="text-gray-600 mb-4">Coming Soon</p>
+    </CardContent>
+  </Card>
+);
+
+const SlotMachine = ({ user, onUpdateUser, onAddTransaction }: any) => (
+  <Card className="h-full flex items-center justify-center">
+    <CardContent className="text-center p-8">
+      <div className="text-8xl mb-4">🎰</div>
+      <h2 className="text-3xl font-bold mb-2">Slot Machine</h2>
+      <p className="text-gray-600 mb-4">Coming Soon</p>
+    </CardContent>
+  </Card>
+);
+
+const Blackjack = ({ user, onUpdateUser, onAddTransaction }: any) => (
+  <Card className="h-full flex items-center justify-center">
+    <CardContent className="text-center p-8">
+      <div className="text-8xl mb-4">♠️</div>
+      <h2 className="text-3xl font-bold mb-2">Blackjack</h2>
+      <p className="text-gray-600 mb-4">Coming Soon</p>
+    </CardContent>
+  </Card>
+);
+
+const Baccarat = ({ user, onUpdateUser, onAddTransaction }: any) => (
+  <Card className="h-full flex items-center justify-center">
+    <CardContent className="text-center p-8">
+      <div className="text-8xl mb-4">🎴</div>
+      <h2 className="text-3xl font-bold mb-2">Baccarat</h2>
+      <p className="text-gray-600 mb-4">Coming Soon</p>
+    </CardContent>
+  </Card>
+);
+
+const Minebomb = ({ user, onUpdateUser, onAddTransaction }: any) => (
+  <Card className="h-full flex items-center justify-center">
+    <CardContent className="text-center p-8">
+      <div className="text-8xl mb-4">💣</div>
+      <h2 className="text-3xl font-bold mb-2">Minebomb</h2>
+      <p className="text-gray-600 mb-4">Coming Soon</p>
+    </CardContent>
+  </Card>
+);
 
 export default CasinoPage;

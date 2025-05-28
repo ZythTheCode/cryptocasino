@@ -61,11 +61,15 @@ export interface Transaction {
 export interface TopupRequest {
   id: string
   user_id: string
+  username: string
   amount: number
   payment_method: 'credit_card' | 'debit_card' | 'paymaya' | 'gcash'
   reference: string
+  reference_number: string
   notes?: string
   receipt_url?: string
+  receipt_data?: string
+  receipt_name?: string
   status: 'pending' | 'approved' | 'rejected'
   processed_by?: string
   created_at: string

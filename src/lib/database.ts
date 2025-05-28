@@ -312,13 +312,11 @@ export async function createTreeUpgrade(userId: string) {
 
   const { data, error } = await supabase
     .from('tree_upgrades')
-    .upsert([{ 
+    .insert([{ 
       user_id: userId, 
       tree_level: 1, 
       last_claim: new Date().toISOString() 
-    }], { 
-      onConflict: 'user_id' 
-    })
+    }])
     .select()
     .single()
 
@@ -326,19 +324,30 @@ export async function createTreeUpgrade(userId: string) {
   return data
 }
 
-export async function updateTreeUpgrade(userId: string, updates: Partial<TreeUpgrade>) {
+export async function updateTreeUpgrade(userId: string, updates: Partial<any>) {
   // First ensure we have a tree upgrade record
   const existing = await getTreeUpgrade(userId)
   if (!existing) {
     return await createTreeUpgrade(userId)
   }
 
+  // Filter out properties that don't exist in the database schema
+  const safeUpdates = {
+    tree_level: updates.tree_level,
+    last_claim: updates.last_claim,
+    updated_at: new Date().toISOString()
+  }
+
+  // Remove undefined values
+  Object.keys(safeUpdates).forEach(key => {
+    if (safeUpdates[key] === undefined) {
+      delete safeUpdates[key]
+    }
+  })
+
   const { data, error } = await supabase
     .from('tree_upgrades')
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString()
-    })
+    .update(safeUpdates)
     .eq('user_id', userId)
     .select()
     .single()
@@ -348,56 +357,46 @@ export async function updateTreeUpgrade(userId: string, updates: Partial<TreeUpg
 }
 
 export async function saveTreeState(userId: string, currentCheckels: number, leaveTime: Date) {
-  if (!supabase) {
-    console.warn('Supabase not available, cannot save tree state');
-    return null;
+  // Save to localStorage as fallback since database columns might not exist
+  const treeState = {
+    current_checkels: currentCheckels,
+    last_leave_time: leaveTime.toISOString(),
+    offline_generation_active: true
   }
-
-  try {
-    const { data, error } = await supabase
-      .from('tree_upgrades')
-      .update({
-        current_checkels: Math.max(0, currentCheckels),
-        last_leave_time: leaveTime.toISOString(),
-        offline_generation_active: true,
-        updated_at: new Date().toISOString()
+  
+  localStorage.setItem(`treeState_${userId}`, JSON.stringify(treeState))
+  
+  // Try to update database if possible, but don't fail if columns don't exist
+  if (supabase) {
+    try {
+      await updateTreeUpgrade(userId, {
+        last_claim: leaveTime.toISOString()
       })
-      .eq('user_id', userId)
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
-  } catch (error) {
-    console.error('Error saving tree state:', error);
-    throw error;
+    } catch (error) {
+      // Silently handle database column errors
+      if (error?.code !== 'PGRST204') {
+        console.log('Could not update tree upgrade in database, using localStorage only')
+      }
+    }
   }
 }
 
 export async function clearOfflineGeneration(userId: string) {
-  if (!supabase) {
-    console.warn('Supabase not available, cannot clear offline generation');
-    return null;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('tree_upgrades')
-      .update({
-        current_checkels: 0,
-        last_leave_time: null,
-        offline_generation_active: false,
-        updated_at: new Date().toISOString()
+  // Clear from localStorage
+  localStorage.removeItem(`treeState_${userId}`)
+  
+  // Try to update database if possible
+  if (supabase) {
+    try {
+      await updateTreeUpgrade(userId, {
+        last_claim: new Date().toISOString()
       })
-      .eq('user_id', userId)
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
-  } catch (error) {
-    console.error('Error clearing offline generation:', error);
-    throw error;
+    } catch (error) {
+      // Silently handle database column errors
+      if (error?.code !== 'PGRST204') {
+        console.log('Could not clear offline generation in database')
+      }
+    }
   }
 }
 

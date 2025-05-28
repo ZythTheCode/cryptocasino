@@ -19,6 +19,7 @@ import { signIn, signUp } from "@/lib/database";
 import { supabase } from '@/lib/supabase'
 import { useLocation, useNavigate } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import MobileNavigation from "@/components/MobileNavigation";
 
 const Index = () => {
   const [username, setUsername] = useState("");
@@ -27,6 +28,8 @@ const Index = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingAfterLogin, setIsLoadingAfterLogin] = useState(false);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -34,7 +37,32 @@ const Index = () => {
         const savedUser = localStorage.getItem("casinoUser");
         if (savedUser) {
           const parsedUser = JSON.parse(savedUser);
+
+          // Set user immediately with localStorage data
           setCurrentUser(parsedUser);
+
+          // Try to sync with database for latest data (including tree level)
+          try {
+            const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+
+            if (freshUser.is_banned) {
+              localStorage.removeItem('casinoUser');
+              setCurrentUser(null);
+              toast({
+                title: "Account Banned",
+                description: "Your account has been banned. Please contact support.",
+                variant: "destructive",
+              });
+              return;
+            }
+
+            // Update with fresh data from database
+            localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+            setCurrentUser(freshUser);
+          } catch (syncError) {
+            console.log('Failed to sync with database, using cached data:', syncError);
+            // Continue with cached data if sync fails
+          }
         }
       } catch (error) {
         console.error('Error loading user:', error);
@@ -44,7 +72,7 @@ const Index = () => {
     };
 
     loadUser();
-  }, []);
+  }, [toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,10 +89,10 @@ const Index = () => {
     try {
       if (isLogin) {
         // Use Supabase signIn function
-        const user = await signIn(username, password);
+        const userData = await signIn(username, password);
 
         // Check if user is banned
-        if (user.is_banned) {
+        if (userData.is_banned) {
           // Clear any existing session
           localStorage.removeItem('casinoUser');
           toast({
@@ -75,19 +103,29 @@ const Index = () => {
           return;
         }
 
-        // Store current user in localStorage for session management
-        localStorage.setItem('casinoUser', JSON.stringify(user));
-        setCurrentUser(user);
+        setUser(userData);
+        localStorage.setItem('casinoUser', JSON.stringify(userData));
+
+        // Show loading state while syncing data
+        setIsLoadingAfterLogin(true);
 
         toast({
           title: "Login Successful",
-          description: `Welcome back, ${username}!`,
+          description: "Syncing your data with database...",
         });
 
-        // Navigate to trigger React Router re-render
+        // Simulate data sync time to ensure database consistency
         setTimeout(() => {
+          setIsLoadingAfterLogin(false);
+
+          toast({
+            title: "Welcome back!",
+            description: `Your data has been synchronized, ${userData.username}!`,
+          });
+
+          // Navigate to trigger React Router re-render
           navigate('/', { replace: true });
-        }, 500);
+        }, 2000);
       } else {
         // Use Supabase signUp function
         const newUser = await signUp(username, password);
@@ -97,23 +135,24 @@ const Index = () => {
         setCurrentUser(newUser);
 
         toast({
-          title: "Registration Successful",
-          description: `Welcome, ${username}!`,
+          title: "🎉 Registration Successful",
+          description: `Welcome, ${username}! You received 10 free checkels to start.`,
         });
 
         // Navigate to trigger React Router re-render
         setTimeout(() => {
           navigate('/', { replace: true });
-        }, 500);
+        }, 1000);
       }
 
       setUsername("");
       setPassword("");
     } catch (error: any) {
       toast({
-        title: isLogin ? "Login Failed" : "Registration Failed", 
+        title: `❌ ${isLogin ? "Login Failed" : "Registration Failed"}`, 
         description: error.message || (isLogin ? "Invalid username or password" : "Failed to create account"),
         variant: "destructive",
+        className: "bg-red-50 border-red-200 text-red-800",
       });
     }
   };
@@ -124,12 +163,24 @@ const Index = () => {
     setUsername("");
     setPassword("");
     toast({
-      title: "Logged Out",
+      title: "👋 Logged Out",
       description: "You have been logged out successfully",
+      className: "bg-gray-50 border-gray-200 text-gray-800",
     });
     // Trigger re-render
     navigate('/', { replace: true });
   };
+
+  if (isLoading || isLoadingAfterLogin) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="flex items-center space-x-2 text-white">
+          <div className="w-6 h-6 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
+          <span>{isLoadingAfterLogin ? 'Syncing data...' : 'Loading...'}</span>
+        </div>
+      </div>
+    );
+  }
 
   if (currentUser) {
     return (
@@ -143,7 +194,7 @@ const Index = () => {
               </span>
             </h1>
             <div className="flex items-center space-x-6">
-              <div className="flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
+              <div className="hidden md:flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
                 <div className="flex items-center space-x-2">
                   <CheckelsIcon className="w-5 h-5 text-yellow-400" />
                   <span className="text-yellow-100 font-semibold">
@@ -159,15 +210,17 @@ const Index = () => {
                 </div>
               </div>
               <div className="flex items-center space-x-3">
-                <span className="text-white/90 font-medium">Welcome, {currentUser?.username}</span>
+                <span className="hidden md:block text-white/90 font-medium">Welcome, {currentUser?.username}</span>
                 <Button
                   onClick={handleLogout}
                   variant="outline"
                   size="sm"
-                  className="bg-red-500/20 border-red-400/30 text-red-100 hover:bg-red-500/30"
+                  className="hidden md:flex bg-red-500/20 border-red-400/30 text-red-100 hover:bg-red-500/30"
                 >
                   Logout
                 </Button>
+
+                <MobileNavigation user={currentUser} currentPage="/" />
               </div>
             </div>
           </div>
@@ -254,7 +307,14 @@ const Index = () => {
 const WelcomeCard = ({ user }: any) => {
   const calculateTreeLevel = (upgrades: any) => {
     if (!upgrades) return 1;
-    return upgrades.treeLevel || 1;
+    // Check both possible tree upgrade sources
+    if (upgrades.treeLevel) return upgrades.treeLevel;
+    if (upgrades.tree_level) return upgrades.tree_level;
+    // Check if tree_upgrades array exists (from database joins)
+    if (user?.tree_upgrades && user.tree_upgrades.length > 0) {
+      return user.tree_upgrades[0].tree_level || 1;
+    }
+    return 1;
   };
 
   const getTreeImage = (level: number) => {
@@ -762,6 +822,8 @@ const AdminPanel = () => {
                   ))}
               </div>
             </div>
+          ```python
+
           </div>
         </CardContent>
       </Card>
@@ -1046,6 +1108,7 @@ const Authentication = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoadingAfterLogin, setIsLoadingAfterLogin] = useState(false);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('casinoUser');
@@ -1129,16 +1192,32 @@ const Authentication = () => {
         return;
       }
 
-      localStorage.setItem("casinoUser", JSON.stringify(userData));
       setUser(userData);
-      setIsLoggedIn(true);
-      setUsername("");
-      setPassword("");
+      localStorage.setItem('casinoUser', JSON.stringify(userData));
+
+      // Show loading state while syncing data
+      setIsLoadingAfterLogin(true);
 
       toast({
-        title: "Login Successful! 🎉",
-        description: `Welcome back, ${userData.username}!`,
+        title: "Login Successful",
+        description: "Syncing your data with database...",
       });
+
+      // Simulate data sync time to ensure database consistency
+      setTimeout(() => {
+        setIsLoadingAfterLogin(false);
+
+        toast({
+          title: "Welcome back!",
+          description: `Your data has been synchronized, ${userData.username}!`,
+        });
+
+        if (userData.is_admin) {
+          navigate('/admin');
+        } else {
+          navigate('/');
+        }
+      }, 2000);
     } catch (error: any) {
       console.error('Login error:', error);
       toast({
@@ -1148,6 +1227,17 @@ const Authentication = () => {
       });
     }
   };
+
+  if (isLoading || isLoadingAfterLogin) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="flex items-center space-x-2 text-white">
+          <div className="w-6 h-6 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
+          <span>{isLoadingAfterLogin ? 'Syncing data...' : 'Loading...'}</span>
+        </div>
+      </div>
+    );
+  }
 
 
   if (user) {

@@ -1,6 +1,5 @@
 import React from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import { Toaster } from "@/components/ui/sonner"
 import Index from "./pages/Index"
 import CasinoPage from "./pages/CasinoPage"
 import TreePage from "./pages/TreePage"
@@ -8,12 +7,12 @@ import WalletPage from "./pages/WalletPage"
 import TopUpPage from "./pages/TopUpPage"
 import WithdrawPage from "./pages/WithdrawPage"
 import TopUpWithdrawPage from "./pages/TopUpWithdrawPage"
+import NotFound from "./pages/NotFound"
 import AdminDashboard from "./pages/AdminDashboard"
 import TestSupabase from "./pages/TestSupabase"
 import MigrationPage from "./pages/MigrationPage"
-import NotFound from "./pages/NotFound"
-import { Toaster as SonnerToaster } from "sonner"
-import './App.css'
+import { Toaster } from "@/components/ui/toaster";
+import "./App.css";
 
 function App() {
   return (
@@ -33,7 +32,6 @@ function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
         <Toaster />
-        <SonnerToaster />
       </div>
     </Router>
   )
