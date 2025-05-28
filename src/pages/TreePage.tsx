@@ -1239,41 +1239,55 @@ const BoosterStore = ({ user, setUser, updateUserAndSync }: any) => {
 
 const TransactionHistory = ({ user }: any) => {
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const loadTransactions = async () => {
+    if (!user?.id) return;
+
+    try {
+      setIsLoading(true);
+      const supabaseTransactions = await getUserTransactions(user.id, 50);
+
+      // Filter only tree-related transactions
+      const treeTransactions = supabaseTransactions.filter((tx: any) => 
+        tx.description?.includes('tree') || 
+        tx.description?.includes('Claimed Checkels') ||
+        tx.description?.includes('Upgraded tree') ||
+        tx.description?.includes('booster') ||
+        tx.description?.includes('Purchased')
+      );
+
+      const formattedTransactions = treeTransactions.map((tx: any) => ({
+        id: tx.id,
+        type: tx.type,
+        amount: tx.coins_amount || tx.amount || 0,
+        timestamp: new Date(tx.created_at).getTime(),
+        description: tx.description
+      }));
+
+      setTransactions(formattedTransactions);
+    } catch (error) {
+      console.error('Error loading tree transactions from Supabase:', error);
+      setTransactions([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadTransactions = async () => {
+    if (user?.id) {
+      loadTransactions();
+    }
+
+    // Set up auto-refresh every 5 seconds for immediate updates
+    refreshIntervalRef.current = setInterval(() => {
       if (user?.id) {
-        try {
-          const supabaseTransactions = await getUserTransactions(user.id, 50);
-
-          // Filter only tree-related transactions
-          const treeTransactions = supabaseTransactions.filter((tx: any) => 
-            tx.description?.includes('tree') || 
-            tx.description?.includes('Claimed Checkels') ||
-            tx.description?.includes('Upgraded tree') ||
-            tx.description?.includes('booster') ||
-            tx.description?.includes('Purchased')
-          );
-
-          const formattedTransactions = treeTransactions.map((tx: any) => ({
-            id: tx.id,
-            type: tx.type,
-            amount: tx.coins_amount || tx.amount || 0,
-            timestamp: new Date(tx.created_at).getTime(),
-            description: tx.description
-          }));
-
-          setTransactions(formattedTransactions);
-        } catch (error) {
-          console.error('Error loading tree transactions from Supabase:', error);
-          setTransactions([]);
-        }
+        loadTransactions();
       }
-    };
+    }, 5000);
 
-    loadTransactions();
-
-    // Set up real-time subscription for tree transactions
+    // Set up real-time subscription for immediate updates
     if (user?.id && supabase) {
       const subscription = supabase
         .channel(`tree_transactions_realtime_${user.id}_${Date.now()}`)
@@ -1284,13 +1298,15 @@ const TransactionHistory = ({ user }: any) => {
           filter: `user_id=eq.${user.id}`
         }, (payload) => {
           console.log('Tree transaction change detected:', payload);
-          // Only add if it's a tree-related transaction
-          if (payload.new?.description?.includes('tree') || 
+          
+          // Check if it's a tree-related transaction
+          const isTreeTransaction = payload.new?.description?.includes('tree') || 
               payload.new?.description?.includes('Claimed Checkels') ||
               payload.new?.description?.includes('Upgraded tree') ||
               payload.new?.description?.includes('booster') ||
-              payload.new?.description?.includes('Purchased')) {
+              payload.new?.description?.includes('Purchased');
 
+          if (isTreeTransaction) {
             if (payload.eventType === 'INSERT') {
               const newTransaction = {
                 id: payload.new.id,
@@ -1316,9 +1332,18 @@ const TransactionHistory = ({ user }: any) => {
         .subscribe();
 
       return () => {
+        if (refreshIntervalRef.current) {
+          clearInterval(refreshIntervalRef.current);
+        }
         supabase.removeChannel(subscription);
       };
     }
+
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current);
+      }
+    };
   }, [user?.id]);
 
   return (
@@ -1331,29 +1356,37 @@ const TransactionHistory = ({ user }: any) => {
       </CardHeader>
       <CardContent>
         <div className="space-y-2 max-h-60 overflow-y-auto">
-          {transactions.slice(0, 50).map((transaction, index) => (
-            <div
-              key={index}
-              className="p-2 bg-white rounded border text-sm flex justify-between items-center"
-            >
-              <div className="flex-1">
-                <p className="font-medium">{transaction.description}</p>
-                <p className="text-xs text-gray-500">
-                  {new Date(transaction.timestamp).toLocaleString()}
-                </p>
-              </div>
-              <div
-                className={`font-bold ${transaction.amount >= 0 ? "text-green-600" : "text-red-600"}`}
-              >
-                {transaction.amount >= 0 ? "+" : ""}
-                {transaction.amount.toFixed(4)} ₵ Checkels
-              </div>
+          {isLoading ? (
+            <div className="text-center py-4">
+              <span className="text-gray-500 text-sm">Loading transactions...</span>
             </div>
-          ))}
-          {transactions.length === 0 && (
-            <p className="text-center text-gray-500 text-sm py-4">
-              No transactions yet
-            </p>
+          ) : (
+            <>
+              {transactions.slice(0, 50).map((transaction, index) => (
+                <div
+                  key={`${transaction.id || index}-${transaction.timestamp}`}
+                  className="p-2 bg-white rounded border text-sm flex justify-between items-center"
+                >
+                  <div className="flex-1">
+                    <p className="font-medium">{transaction.description}</p>
+                    <p className="text-xs text-gray-500">
+                      {new Date(transaction.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <div
+                    className={`font-bold ${transaction.amount >= 0 ? "text-green-600" : "text-red-600"}`}
+                  >
+                    {transaction.amount >= 0 ? "+" : ""}
+                    {transaction.amount.toFixed(4)} ₵ Checkels
+                  </div>
+                </div>
+              ))}
+              {transactions.length === 0 && (
+                <p className="text-center text-gray-500 text-sm py-4">
+                  No transactions yet
+                </p>
+              )}
+            </>
           )}
         </div>
       </CardContent>

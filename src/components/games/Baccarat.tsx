@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChipsIcon } from "@/components/ui/icons";
-import { soundManager } from "@/utils/sounds";
 import { useToast } from "@/hooks/use-toast";
+import { soundManager } from "@/utils/sounds";
+import TransactionHistory from "@/components/TransactionHistory";
 
 interface BaccaratProps {
   user: any;
@@ -16,7 +16,7 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
   const [betAmount, setBetAmount] = useState(10);
   const [betType, setBetType] = useState<'player' | 'banker' | 'tie' | null>(null);
   const [gameActive, setGameActive] = useState(false);
-  const [isRevealing, setIsRevealing] = useState(false);
+  const [isRevealing, setIsRevealing] = useState(isRevealing);
   const [playerCards, setPlayerCards] = useState<number[]>([]);
   const [bankerCards, setBankerCards] = useState<number[]>([]);
   const [playerScore, setPlayerScore] = useState(0);
@@ -222,171 +222,172 @@ const Baccarat = ({ user, onUpdateUser, onAddTransaction }: BaccaratProps) => {
   };
 
   return (
-    <Card className="w-full max-w-4xl mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center space-x-2 text-center">
-          <span>🎴</span>
-          <span>Baccarat</span>
-        </CardTitle>
-        <div className="text-center text-sm text-gray-600">
-          <p>Bet on Player (1:1), Banker (0.95:1), or Tie (8:1)</p>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {!gameActive ? (
-          <div className="space-y-4">
-            {/* Bet Selection */}
-            <div className="space-y-3">
-              <h3 className="font-medium text-center">Choose Your Bet:</h3>
-              <div className="grid grid-cols-3 gap-3">
-                <Button
-                  variant={betType === 'player' ? 'default' : 'outline'}
-                  onClick={() => setBetType('player')}
-                  className="h-16 flex flex-col space-y-1"
-                >
-                  <span className="text-lg">👤</span>
-                  <span>Player</span>
-                  <span className="text-xs">1:1</span>
-                </Button>
-                <Button
-                  variant={betType === 'banker' ? 'default' : 'outline'}
-                  onClick={() => setBetType('banker')}
-                  className="h-16 flex flex-col space-y-1"
-                >
-                  <span className="text-lg">🏦</span>
-                  <span>Banker</span>
-                  <span className="text-xs">0.95:1</span>
-                </Button>
-                <Button
-                  variant={betType === 'tie' ? 'default' : 'outline'}
-                  onClick={() => setBetType('tie')}
-                  className="h-16 flex flex-col space-y-1"
-                >
-                  <span className="text-lg">🤝</span>
-                  <span>Tie</span>
-                  <span className="text-xs">8:1</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Bet Amount */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-center">Bet Amount:</label>
-              <div className="flex space-x-2 max-w-md mx-auto">
-                <input
-                  type="number"
-                  min="1"
-                  max={user.chips}
-                  value={betAmount}
-                  onChange={(e) => setBetAmount(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="flex-1 px-3 py-2 border rounded-lg text-center"
-                />
-                <Button
-                  variant="outline"
-                  onClick={() => setBetAmount(Math.floor(user.chips / 4))}
-                  disabled={user.chips < 4}
-                >
-                  25%
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setBetAmount(Math.floor(user.chips / 2))}
-                  disabled={user.chips < 2}
-                >
-                  50%
-                </Button>
-              </div>
-            </div>
-
-            <Button 
-              onClick={startGame} 
-              className="w-full py-3 text-lg bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700" 
-              disabled={!betType || betAmount > user.chips || betAmount < 1}
-            >
-              Deal Cards ({betAmount} chips)
-            </Button>
-
-            {gameResult && (
-              <div className="p-4 bg-gray-100 rounded-lg text-center">
-                <p className="font-medium">{gameResult}</p>
-                <Button onClick={resetGame} className="mt-2">
-                  Play Again
-                </Button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Game Table */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Player Side */}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-center space-x-2">
+            <span>🃏</span>
+            <span>Baccarat</span>
+            <span>🎴</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {!gameActive ? (
+            <div className="space-y-4">
+              {/* Bet Selection */}
               <div className="space-y-3">
-                <h3 className="font-bold text-center text-blue-600">Player</h3>
-                <div className="min-h-[100px] flex justify-center items-center space-x-2">
-                  {playerCards.map((card, index) => (
-                    <div
-                      key={index}
-                      className="w-16 h-24 bg-white border-2 border-gray-300 rounded-lg flex flex-col items-center justify-center font-bold shadow-lg transform transition-transform duration-300 hover:scale-105"
-                    >
-                      <span className="text-lg">{getCardDisplay(card)}</span>
-                      <span className="text-sm">{getSuit(index)}</span>
-                    </div>
-                  ))}
-                  {isRevealing && revealStep < 3 && (
-                    <div className="w-16 h-24 bg-blue-500 border-2 border-blue-600 rounded-lg flex items-center justify-center animate-pulse">
-                      <span className="text-white">?</span>
-                    </div>
-                  )}
-                </div>
-                <div className="text-center">
-                  <span className="text-xl font-bold">Score: {playerScore}</span>
+                <h3 className="font-medium text-center">Choose Your Bet:</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <Button
+                    variant={betType === 'player' ? 'default' : 'outline'}
+                    onClick={() => setBetType('player')}
+                    className="h-16 flex flex-col space-y-1"
+                  >
+                    <span className="text-lg">👤</span>
+                    <span>Player</span>
+                    <span className="text-xs">1:1</span>
+                  </Button>
+                  <Button
+                    variant={betType === 'banker' ? 'default' : 'outline'}
+                    onClick={() => setBetType('banker')}
+                    className="h-16 flex flex-col space-y-1"
+                  >
+                    <span className="text-lg">🏦</span>
+                    <span>Banker</span>
+                    <span className="text-xs">0.95:1</span>
+                  </Button>
+                  <Button
+                    variant={betType === 'tie' ? 'default' : 'outline'}
+                    onClick={() => setBetType('tie')}
+                    className="h-16 flex flex-col space-y-1"
+                  >
+                    <span className="text-lg">🤝</span>
+                    <span>Tie</span>
+                    <span className="text-xs">8:1</span>
+                  </Button>
                 </div>
               </div>
 
-              {/* Banker Side */}
-              <div className="space-y-3">
-                <h3 className="font-bold text-center text-red-600">Banker</h3>
-                <div className="min-h-[100px] flex justify-center items-center space-x-2">
-                  {bankerCards.map((card, index) => (
-                    <div
-                      key={index}
-                      className="w-16 h-24 bg-white border-2 border-gray-300 rounded-lg flex flex-col items-center justify-center font-bold shadow-lg transform transition-transform duration-300 hover:scale-105"
-                    >
-                      <span className="text-lg">{getCardDisplay(card)}</span>
-                      <span className="text-sm">{getSuit(index)}</span>
-                    </div>
-                  ))}
-                  {isRevealing && revealStep < 4 && (
-                    <div className="w-16 h-24 bg-red-500 border-2 border-red-600 rounded-lg flex items-center justify-center animate-pulse">
-                      <span className="text-white">?</span>
-                    </div>
-                  )}
-                </div>
-                <div className="text-center">
-                  <span className="text-xl font-bold">Score: {bankerScore}</span>
+              {/* Bet Amount */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-center">Bet Amount:</label>
+                <div className="flex space-x-2 max-w-md mx-auto">
+                  <input
+                    type="number"
+                    min="1"
+                    max={user.chips}
+                    value={betAmount}
+                    onChange={(e) => setBetAmount(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="flex-1 px-3 py-2 border rounded-lg text-center"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => setBetAmount(Math.floor(user.chips / 4))}
+                    disabled={user.chips < 4}
+                  >
+                    25%
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setBetAmount(Math.floor(user.chips / 2))}
+                    disabled={user.chips < 2}
+                  >
+                    50%
+                  </Button>
                 </div>
               </div>
-            </div>
 
-            {/* Current Bet Display */}
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <p className="text-lg">
-                <span className="font-medium">Your Bet:</span> {betAmount} chips on{' '}
-                <span className="font-bold capitalize text-purple-600">{betType}</span>
-              </p>
-              {isRevealing && (
-                <p className="text-sm text-gray-600 mt-2">Revealing cards...</p>
+              <Button 
+                onClick={startGame} 
+                className="w-full py-3 text-lg bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700" 
+                disabled={!betType || betAmount > user.chips || betAmount < 1}
+              >
+                Deal Cards ({betAmount} chips)
+              </Button>
+
+              {gameResult && (
+                <div className="p-4 bg-gray-100 rounded-lg text-center">
+                  <p className="font-medium">{gameResult}</p>
+                  <Button onClick={resetGame} className="mt-2">
+                    Play Again
+                  </Button>
+                </div>
               )}
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="space-y-6">
+              {/* Game Table */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Player Side */}
+                <div className="space-y-3">
+                  <h3 className="font-bold text-center text-blue-600">Player</h3>
+                  <div className="min-h-[100px] flex justify-center items-center space-x-2">
+                    {playerCards.map((card, index) => (
+                      <div
+                        key={index}
+                        className="w-16 h-24 bg-white border-2 border-gray-300 rounded-lg flex flex-col items-center justify-center font-bold shadow-lg transform transition-transform duration-300 hover:scale-105"
+                      >
+                        <span className="text-lg">{getCardDisplay(card)}</span>
+                        <span className="text-sm">{getSuit(index)}</span>
+                      </div>
+                    ))}
+                    {isRevealing && revealStep < 3 && (
+                      <div className="w-16 h-24 bg-blue-500 border-2 border-blue-600 rounded-lg flex items-center justify-center animate-pulse">
+                        <span className="text-white">?</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <span className="text-xl font-bold">Score: {playerScore}</span>
+                  </div>
+                </div>
 
-        {/* Available Chips */}
-        <div className="text-center text-sm text-gray-600 p-3 bg-blue-50 rounded-lg">
-          Available Chips: <span className="font-bold text-blue-700">{user.chips}</span>
-        </div>
-      </CardContent>
-    </Card>
+                {/* Banker Side */}
+                <div className="space-y-3">
+                  <h3 className="font-bold text-center text-red-600">Banker</h3>
+                  <div className="min-h-[100px] flex justify-center items-center space-x-2">
+                    {bankerCards.map((card, index) => (
+                      <div
+                        key={index}
+                        className="w-16 h-24 bg-white border-2 border-gray-300 rounded-lg flex flex-col items-center justify-center font-bold shadow-lg transform transition-transform duration-300 hover:scale-105"
+                      >
+                        <span className="text-lg">{getCardDisplay(card)}</span>
+                        <span className="text-sm">{getSuit(index)}</span>
+                      </div>
+                    ))}
+                    {isRevealing && revealStep < 4 && (
+                      <div className="w-16 h-24 bg-red-500 border-2 border-red-600 rounded-lg flex items-center justify-center animate-pulse">
+                        <span className="text-white">?</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <span className="text-xl font-bold">Score: {bankerScore}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Current Bet Display */}
+              <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <p className="text-lg">
+                  <span className="font-medium">Your Bet:</span> {betAmount} chips on{' '}
+                  <span className="font-bold capitalize text-purple-600">{betType}</span>
+                </p>
+                {isRevealing && (
+                  <p className="text-sm text-gray-600 mt-2">Revealing cards...</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Available Chips */}
+          <div className="text-center text-sm text-gray-600 p-3 bg-blue-50 rounded-lg">
+            Available Chips: <span className="font-bold text-blue-700">{user.chips}</span>
+          </div>
+        </CardContent>
+      </Card>
+      <TransactionHistory user={user} filterType="casino" gameFilter="Baccarat" />
+    </div>
   );
 };
 

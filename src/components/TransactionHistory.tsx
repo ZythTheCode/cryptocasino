@@ -1,7 +1,4 @@
-The code is modified to include real-time updates and auto-refresh functionality for transaction history using Supabase.
-```
 
-```replit_final_file
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DollarSign } from "lucide-react";
@@ -12,36 +9,49 @@ import { useToast } from "@/hooks/use-toast";
 interface TransactionHistoryProps {
   user: any;
   filterType?: 'casino' | 'wallet' | 'tree' | 'all';
+  gameFilter?: string;
   maxItems?: number;
 }
 
-const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: TransactionHistoryProps) => {
+const TransactionHistory = ({ user, filterType = 'all', gameFilter, maxItems = 50 }: TransactionHistoryProps) => {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const filterTransactions = (transactions: any[], type: string) => {
+  const filterTransactions = (transactions: any[], type: string, game?: string) => {
+    let filtered = transactions;
+    
     switch (type) {
       case 'casino':
-        return transactions.filter((tx: any) => 
+        filtered = transactions.filter((tx: any) => 
           tx.game || ['bet', 'win', 'loss', 'refund'].includes(tx.type)
         );
+        break;
       case 'wallet':
-        return transactions.filter((tx: any) => 
+        filtered = transactions.filter((tx: any) => 
           ['conversion', 'chip_conversion', 'topup', 'withdrawal'].includes(tx.type)
         );
+        break;
       case 'tree':
-        return transactions.filter((tx: any) => 
+        filtered = transactions.filter((tx: any) => 
           tx.description?.includes('tree') || 
           tx.description?.includes('Claimed Checkels') ||
           tx.description?.includes('Upgraded tree') ||
           tx.description?.includes('booster') ||
           tx.description?.includes('Purchased')
         );
+        break;
       default:
-        return transactions;
+        filtered = transactions;
     }
+
+    // Apply game filter if specified
+    if (game) {
+      filtered = filtered.filter((tx: any) => tx.game === game);
+    }
+
+    return filtered;
   };
 
   const loadTransactions = async () => {
@@ -51,8 +61,8 @@ const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: Transac
       setIsLoading(true);
       const dbTransactions = await getUserTransactions(user.id, maxItems);
 
-      // Filter transactions based on type
-      const filteredTransactions = filterTransactions(dbTransactions, filterType);
+      // Filter transactions based on type and game
+      const filteredTransactions = filterTransactions(dbTransactions, filterType, gameFilter);
 
       // Format transactions for display
       const formattedTransactions = filteredTransactions.map((tx: any) => ({
@@ -171,7 +181,7 @@ const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: Transac
       <CardHeader>
         <CardTitle className="flex items-center space-x-2">
           <DollarSign className="w-6 h-6 text-green-500" />
-          <span>Transaction History</span>
+          <span>{gameFilter ? `${gameFilter} History` : 'Transaction History'}</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -215,5 +225,3 @@ const TransactionHistory = ({ user, filterType = 'all', maxItems = 50 }: Transac
 };
 
 export default TransactionHistory;
-```The code has been updated to include real-time updates and periodic auto-refresh for transaction history, and useRef is used to manage the interval.
-```

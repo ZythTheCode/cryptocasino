@@ -1,30 +1,26 @@
 import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
-import { Coins, DollarSign, Home, Gamepad2, Wallet, Users, Menu, LogOut, Settings, TreePine } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import { signIn, updateUserBalance, addTransaction } from '@/lib/database';
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Gamepad2, Home, TreePine, Wallet, ArrowLeft, Settings } from "lucide-react";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
-import { supabase } from '@/lib/supabase';
+import { Link, useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 import MobileNavigation from "@/components/MobileNavigation";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import SlotMachine from "@/components/games/SlotMachine";
+import Blackjack from "@/components/games/Blackjack";
+import ColorGame from "@/components/games/ColorGame";
+import Minebomb from "@/components/games/Minebomb";
+import Baccarat from "@/components/games/Baccarat";
+import { addTransaction, updateUserBalance, signIn } from "@/lib/database";
 
 const CasinoPage = () => {
   const [user, setUser] = useState<any>(null);
-  const [selectedGame, setSelectedGame] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [pageLoading, setPageLoading] = useState(true);
+  const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -189,18 +185,18 @@ const CasinoPage = () => {
   const handleApproveTopUp = async (topUpId: string) => {
     try {
       const { updateTopupRequestStatus, getPendingTopupRequests } = await import('@/lib/database');
-      
+
       await updateTopupRequestStatus(topUpId, 'approved', user.username);
-      
+
       toast({
         title: "Top-up Approved",
         description: "Top-up request has been approved successfully",
       });
-      
+
       // Reload data to update UI
       const pendingRequests = await getPendingTopupRequests();
       // Update local state if needed
-      
+
     } catch (error) {
       console.error('Error approving top-up:', error);
       toast({
@@ -214,19 +210,19 @@ const CasinoPage = () => {
   const handleRejectTopUp = async (topUpId: string) => {
     try {
       const { updateTopupRequestStatus, getPendingTopupRequests } = await import('@/lib/database');
-      
+
       await updateTopupRequestStatus(topUpId, 'rejected', user.username);
-      
+
       toast({
         title: "Top-up Rejected",
         description: "Top-up request has been rejected",
         variant: "destructive",
       });
-      
+
       // Reload data to update UI
       const pendingRequests = await getPendingTopupRequests();
       // Update local state if needed
-      
+
     } catch (error) {
       console.error('Error rejecting top-up:', error);
       toast({
@@ -241,63 +237,99 @@ const CasinoPage = () => {
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
       <CasinoHeader user={user} />
       <div className="max-w-7xl mx-auto p-6">
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
-          {/* Left Sidebar - Wallet & Game Selection */}
-          <div className="xl:col-span-1 space-y-6">
-            <ChipsWallet user={user} />
-            <GameSelector selectedGame={selectedGame} onSelectGame={setSelectedGame} />
-            {user?.isAdmin && <AdminPanel />}
-          </div>
+          {!selectedGame ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <GameCard
+                title="Slot Machine"
+                description="Spin the reels and match symbols to win big!"
+                emoji="🎰"
+                status="available"
+                onPlay={() => setSelectedGame('slots')}
+              />
+              <GameCard
+                title="Blackjack"
+                description="Get as close to 21 as possible without going over"
+                emoji="♠️"
+                status="available"
+                onPlay={() => setSelectedGame('blackjack')}
+              />
+              <GameCard
+                title="Color Game"
+                description="Bet on colors and watch the wheel spin!"
+                emoji="🌈"
+                status="available"
+                onPlay={() => setSelectedGame('color')}
+              />
+              <GameCard
+                title="Mine Bomb"
+                description="Avoid the bombs and collect treasures safely"
+                emoji="💣"
+                status="available"
+                onPlay={() => setSelectedGame('minebomb')}
+              />
+              <GameCard
+                title="Baccarat"
+                description="Classic card game of chance and strategy"
+                emoji="🃏"
+                status="available"
+                onPlay={() => setSelectedGame('baccarat')}
+              />
+              <GameCard
+                title="More Games"
+                description="More exciting games coming soon!"
+                emoji="🎮"
+                status="coming-soon"
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <Button 
+                onClick={() => setSelectedGame(null)}
+                variant="outline"
+                className="mb-4 bg-white/10 border-white/20 text-white hover:bg-white/20"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Games
+              </Button>
 
-          {/* Main Content - Game */}
-          <div className="xl:col-span-2">
-            {selectedGame === 'color-game' && (
-              <ColorGame 
-                user={user} 
-                onUpdateUser={updateUser} 
-                onAddTransaction={addTransactionRecord} 
-              />
-            )}
-            {selectedGame === 'slots' && (
-              <SlotMachine 
-                user={user} 
-                onUpdateUser={updateUser} 
-                onAddTransaction={addTransactionRecord} 
-              />
-            )}
-            {selectedGame === 'blackjack' && (
-              <Blackjack 
-                user={user} 
-                onUpdateUser={updateUser} 
-                onAddTransaction={addTransactionRecord} 
-              />
-            )}
-            {selectedGame === 'baccarat' && (
-              <Baccarat user={user} onUpdateUser={updateUser} onAddTransaction={addTransactionRecord} />
-            )}
-            {selectedGame === 'minebomb' && (
-              <Minebomb user={user} onUpdateUser={updateUser} onAddTransaction={addTransactionRecord} />
-            )}
-            {selectedGame === 'roulette' && (
-              <ComingSoonGame name="Roulette" icon="🔴" description="Red, black, or green" />
-            )}
-            {!selectedGame && (
-              <Card className="h-full flex items-center justify-center">
-                <CardContent className="text-center p-8">
-                  <div className="text-6xl mb-4">🎮</div>
-                  <h2 className="text-2xl font-bold mb-2">Welcome to the Casino!</h2>
-                  <p className="text-gray-600">Select a game from the left to start playing</p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Right Sidebar - Transaction History (wider) */}
-          <div className="xl:col-span-2">
-            <TransactionHistory user={user} filterType="casino" />
-          </div>
+              {selectedGame === 'slots' && (
+                <SlotMachine 
+                  user={user} 
+                  onUpdateUser={updateUser}
+                  onAddTransaction={addTransactionRecord}
+                />
+              )}
+              {selectedGame === 'blackjack' && (
+                <Blackjack 
+                  user={user} 
+                  onUpdateUser={updateUser}
+                  onAddTransaction={addTransactionRecord}
+                />
+              )}
+              {selectedGame === 'color' && (
+                <ColorGame 
+                  user={user} 
+                  onUpdateUser={updateUser}
+                  onAddTransaction={addTransactionRecord}
+                />
+              )}
+              {selectedGame === 'minebomb' && (
+                <Minebomb 
+                  user={user} 
+                  onUpdateUser={updateUser}
+                  onAddTransaction={addTransactionRecord}
+                />
+              )}
+              {selectedGame === 'baccarat' && (
+                <Baccarat 
+                  user={user} 
+                  onUpdateUser={updateUser}
+                  onAddTransaction={addTransactionRecord}
+                />
+              )}
+            </div>
+          )}
         </div>
-      </div>
     </div>
   );
 };
@@ -733,55 +765,43 @@ const AdminPanel = () => {
 
 import TransactionHistory from "@/components/TransactionHistory";
 
-// Placeholder components for missing games
-const ColorGame = ({ user, onUpdateUser, onAddTransaction }: any) => (
-  <Card className="h-full flex items-center justify-center">
-    <CardContent className="text-center p-8">
-      <div className="text-8xl mb-4">🎨</div>
-      <h2 className="text-3xl font-bold mb-2">Color Game</h2>
-      <p className="text-gray-600 mb-4">Coming Soon</p>
-    </CardContent>
-  </Card>
-);
-
-const SlotMachine = ({ user, onUpdateUser, onAddTransaction }: any) => (
-  <Card className="h-full flex items-center justify-center">
-    <CardContent className="text-center p-8">
-      <div className="text-8xl mb-4">🎰</div>
-      <h2 className="text-3xl font-bold mb-2">Slot Machine</h2>
-      <p className="text-gray-600 mb-4">Coming Soon</p>
-    </CardContent>
-  </Card>
-);
-
-const Blackjack = ({ user, onUpdateUser, onAddTransaction }: any) => (
-  <Card className="h-full flex items-center justify-center">
-    <CardContent className="text-center p-8">
-      <div className="text-8xl mb-4">♠️</div>
-      <h2 className="text-3xl font-bold mb-2">Blackjack</h2>
-      <p className="text-gray-600 mb-4">Coming Soon</p>
-    </CardContent>
-  </Card>
-);
-
-const Baccarat = ({ user, onUpdateUser, onAddTransaction }: any) => (
-  <Card className="h-full flex items-center justify-center">
-    <CardContent className="text-center p-8">
-      <div className="text-8xl mb-4">🎴</div>
-      <h2 className="text-3xl font-bold mb-2">Baccarat</h2>
-      <p className="text-gray-600 mb-4">Coming Soon</p>
-    </CardContent>
-  </Card>
-);
-
-const Minebomb = ({ user, onUpdateUser, onAddTransaction }: any) => (
-  <Card className="h-full flex items-center justify-center">
-    <CardContent className="text-center p-8">
-      <div className="text-8xl mb-4">💣</div>
-      <h2 className="text-3xl font-bold mb-2">Minebomb</h2>
-      <p className="text-gray-600 mb-4">Coming Soon</p>
-    </CardContent>
-  </Card>
-);
+const GameCard = ({ title, description, emoji, status, onPlay }: {
+  title: string;
+  description: string;
+  emoji: string;
+  status: "available" | "coming-soon";
+  onPlay?: () => void;
+}) => {
+  return (
+    <Card className="bg-white/10 backdrop-blur-lg border-white/20 hover:bg-white/15 transition-all">
+      <CardHeader>
+        <CardTitle className="text-white flex items-center space-x-3">
+          <span className="text-3xl">{emoji}</span>
+          <span>{title}</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-white/80 mb-4">{description}</p>
+        <div className="flex justify-between items-center">
+          <Badge 
+            variant={status === "available" ? "default" : "secondary"}
+            className={status === "available" ? "bg-green-500/20 text-green-100" : "bg-yellow-500/20 text-yellow-100"}
+          >
+            {status === "available" ? "Available" : "Coming Soon"}
+          </Badge>
+          <Button 
+            size="sm" 
+            disabled={status !== "available"}
+            onClick={onPlay}
+            className="bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30"
+            variant="outline"
+          >
+            {status === "available" ? "Play Now" : "Soon"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
 
 export default CasinoPage;

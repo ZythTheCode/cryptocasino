@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { soundManager } from "@/utils/sounds";
+import TransactionHistory from "@/components/TransactionHistory";
 
 interface MinebombProps {
   user: any;
@@ -217,16 +218,17 @@ const Minebomb = ({ user, onUpdateUser, onAddTransaction }: MinebombProps) => {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-center space-x-2">
-          <span>💣</span>
-          <span>Minebomb</span>
-          <span>💎</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-6">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-center space-x-2">
+            <span>💣</span>
+            <span>Minebomb</span>
+            <span>💎</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
           {gameState === 'betting' && (
             <div className="text-center">
               <h3 className="font-bold text-lg mb-6">Setup Your Game</h3>
@@ -327,8 +329,18 @@ const Minebomb = ({ user, onUpdateUser, onAddTransaction }: MinebombProps) => {
             </ul>
           </div>
         </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      <div>
+        <TransactionHistory 
+          user={user} 
+          filterType="casino" 
+          gameFilter="Minebomb"
+          maxItems={20} 
+        />
+      </div>
+    </div>
   );
 };
 

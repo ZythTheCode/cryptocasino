@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { soundManager } from "@/utils/sounds";
+import TransactionHistory from "@/components/TransactionHistory";
 
 interface ColorGameProps {
   user: any;
@@ -205,184 +207,187 @@ const ColorGame = ({ user, onUpdateUser, onAddTransaction }: ColorGameProps) => 
   };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
-      <CardHeader className="text-center">
-        <CardTitle className="flex items-center justify-center space-x-2 text-2xl">
-          <span>🎲</span>
-          <span>Color Game (Perya Style)</span>
-        </CardTitle>
-        <div className="text-sm text-gray-600 space-y-1">
-          <p className="font-medium">Select colors to bet on • Roll 3 dice • Match colors to win!</p>
-          <p className="text-xs">1 match = 2x • 2 matches = 3x • 3+ matches = 4x</p>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-6">
-        {/* Color Betting Grid */}
-        <div className="space-y-3">
-          <h3 className="font-medium text-gray-700 text-center">Select Colors to Bet On:</h3>
-          <div className="grid grid-cols-2 gap-4">
-            {colors.map((color) => {
-              const currentBet = colorBets[color.name] || 0;
-              const hasBet = currentBet > 0;
-
-              return (
-                <div
-                  key={color.name}
-                  className={`p-4 rounded-lg border-2 transition-all ${
-                    hasBet
-                      ? `${color.borderColor} ring-2 ring-gray-400` 
-                      : 'border-gray-300'
-                  } ${color.bgColor}`}
-                >
-                  <div className={`font-bold text-center mb-2 ${color.textColor}`}>
-                    {color.name}
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="number"
-                      min="0"
-                      max={user.chips}
-                      value={currentBet}
-                      onChange={(e) => updateColorBet(color.name, parseInt(e.target.value) || 0)}
-                      className="flex-1 px-2 py-1 text-sm border rounded text-center"
-                      placeholder="0"
-                      disabled={isRolling}
-                    />
-                    <span className={`text-xs ${color.textColor}`}>chips</span>
-                  </div>
-
-                  <div className="flex space-x-1 mt-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => updateColorBet(color.name, Math.min(currentBet + 1, user.chips))}
-                      disabled={isRolling || currentBet >= user.chips}
-                      className="flex-1 h-6 text-xs"
-                    >
-                      +1
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => updateColorBet(color.name, Math.min(currentBet + 5, user.chips))}
-                      disabled={isRolling || currentBet + 5 > user.chips}
-                      className="flex-1 h-6 text-xs"
-                    >
-                      +5
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => updateColorBet(color.name, 0)}
-                      disabled={isRolling || currentBet === 0}
-                      className="flex-1 h-6 text-xs"
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <Card className="lg:col-span-2">
+        <CardHeader className="text-center">
+          <CardTitle className="flex items-center justify-center space-x-2 text-2xl">
+            <span>🎲</span>
+            <span>Color Game (Perya Style)</span>
+          </CardTitle>
+          <div className="text-sm text-gray-600 space-y-1">
+            <p className="font-medium">Select colors to bet on • Roll 3 dice • Match colors to win!</p>
+            <p className="text-xs">1 match = 2x • 2 matches = 3x • 3+ matches = 4x</p>
           </div>
-        </div>
+        </CardHeader>
 
-        {/* Betting Summary */}
-        <div className="space-y-3">
-          <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border">
-            <span className="font-medium">Total Bet:</span>
-            <span className="font-bold text-lg text-blue-600">{getTotalBet()} chips</span>
-          </div>
-
-          <div className="flex space-x-2">
-            <Button
-              onClick={rollDice}
-              className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 py-3"
-              disabled={isRolling || getSelectedColors().length === 0 || getTotalBet() > user.chips}
-            >
-              {isRolling ? 'Rolling...' : '🎲 Roll Dice'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={maxBetPerColor}
-              disabled={isRolling || getSelectedColors().length === 0}
-              className="px-4"
-            >
-              Max
-            </Button>
-            <Button
-              variant="outline"
-              onClick={clearAllBets}
-              disabled={isRolling || Object.keys(colorBets).length === 0}
-              className="px-4"
-            >
-              Clear All
-            </Button>
-          </div>
-        </div>
-
-        {/* Dice Results */}
-        {diceResults.length > 0 && (
+        <CardContent className="space-y-6">
+          {/* Color Betting Grid */}
           <div className="space-y-3">
-            <h3 className="font-medium text-gray-700 text-center">Dice Results:</h3>
-            <div className="flex justify-center space-x-4">
-              {diceResults.map((color, index) => {
-                const colorClass = getColorClass(color);
+            <h3 className="font-medium text-gray-700 text-center">Select Colors to Bet On:</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {colors.map((color) => {
+                const currentBet = colorBets[color.name] || 0;
+                const hasBet = currentBet > 0;
+
                 return (
                   <div
-                    key={index}
-                    className={`w-20 h-20 rounded-lg border-3 ${colorClass.border} flex items-center justify-center ${
-                      isRolling ? 'animate-bounce' : ''
-                    } ${colorClass.bg} shadow-lg`}
+                    key={color.name}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      hasBet
+                        ? `${color.borderColor} ring-2 ring-gray-400` 
+                        : 'border-gray-300'
+                    } ${color.bgColor}`}
                   >
-                    <span className={`font-bold text-sm ${colorClass.text}`}>
-                      {color}
-                    </span>
+                    <div className={`font-bold text-center mb-2 ${color.textColor}`}>
+                      {color.name}
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max={user.chips}
+                        value={currentBet}
+                        onChange={(e) => updateColorBet(color.name, parseInt(e.target.value) || 0)}
+                        className="flex-1 px-2 py-1 text-sm border rounded text-center"
+                        placeholder="0"
+                        disabled={isRolling}
+                      />
+                      <span className={`text-xs ${color.textColor}`}>chips</span>
+                    </div>
+
+                    <div className="flex space-x-1 mt-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateColorBet(color.name, Math.min(currentBet + 1, user.chips))}
+                        disabled={isRolling || currentBet >= user.chips}
+                        className="flex-1 h-6 text-xs"
+                      >
+                        +1
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateColorBet(color.name, Math.min(currentBet + 5, user.chips))}
+                        disabled={isRolling || currentBet + 5 > user.chips}
+                        className="flex-1 h-6 text-xs"
+                      >
+                        +5
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateColorBet(color.name, 0)}
+                        disabled={isRolling || currentBet === 0}
+                        className="flex-1 h-6 text-xs"
+                      >
+                        Clear
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
-        )}
 
-        {/* Result Display */}
-        {lastResult && !isRolling && (
-          <div className={`p-4 rounded-lg border-2 ${
-            lastResult.winnings > 0 
-              ? 'bg-green-50 border-green-300' 
-              : 'bg-red-50 border-red-300'
-          }`}>
-            <div className="text-center space-y-2">
-              <p className="font-bold text-lg">
-                {lastResult.winnings > 0 ? '🎉 You Win!' : '😢 Try Again!'}
-              </p>
-              <div className="text-sm space-y-1">
-                <p>Total Matches: <span className="font-bold">{lastResult.matches}</span></p>
-                <p>Total Bet: <span className="font-bold">{lastResult.totalBet} chips</span></p>
-                {lastResult.winnings > 0 && (
-                  <p className="text-green-700 font-bold text-lg">
-                    Total Winnings: {lastResult.winnings} chips
-                  </p>
-                )}
-              </div>
+          {/* Betting Summary */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border">
+              <span className="font-medium">Total Bet:</span>
+              <span className="font-bold text-lg text-blue-600">{getTotalBet()} chips</span>
+            </div>
+
+            <div className="flex space-x-2">
+              <Button
+                onClick={rollDice}
+                className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 py-3"
+                disabled={isRolling || getSelectedColors().length === 0 || getTotalBet() > user.chips}
+              >
+                {isRolling ? 'Rolling...' : '🎲 Roll Dice'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={maxBetPerColor}
+                disabled={isRolling || getSelectedColors().length === 0}
+                className="px-4"
+              >
+                Max
+              </Button>
+              <Button
+                variant="outline"
+                onClick={clearAllBets}
+                disabled={isRolling || Object.keys(colorBets).length === 0}
+                className="px-4"
+              >
+                Clear All
+              </Button>
             </div>
           </div>
-        )}
 
-        {/* Current Status */}
-        <div className="text-center text-sm text-gray-600 space-y-1 p-3 bg-blue-50 rounded-lg">
-          <p>Available Chips: <span className="font-bold text-blue-700">{user.chips}</span></p>
-          {getSelectedColors().length > 0 && (
-            <p>
-              Betting on: <span className="font-medium text-blue-700">
-                {getSelectedColors().map(color => `${color} (${colorBets[color]})`).join(', ')}
-              </span>
-            </p>
+          {/* Dice Results */}
+          {diceResults.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="font-medium text-gray-700 text-center">Dice Results:</h3>
+              <div className="flex justify-center space-x-4">
+                {diceResults.map((color, index) => {
+                  const colorClass = getColorClass(color);
+                  return (
+                    <div
+                      key={index}
+                      className={`w-20 h-20 rounded-lg border-3 ${colorClass.border} flex items-center justify-center ${
+                        isRolling ? 'animate-bounce' : ''
+                      } ${colorClass.bg} shadow-lg`}
+                    >
+                      <span className={`font-bold text-sm ${colorClass.text}`}>
+                        {color}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
-        </div>
-      </CardContent>
-    </Card>
+
+          {/* Result Display */}
+          {lastResult && !isRolling && (
+            <div className={`p-4 rounded-lg border-2 ${
+              lastResult.winnings > 0 
+                ? 'bg-green-50 border-green-300' 
+                : 'bg-red-50 border-red-300'
+            }`}>
+              <div className="text-center space-y-2">
+                <p className="font-bold text-lg">
+                  {lastResult.winnings > 0 ? '🎉 You Win!' : '😢 Try Again!'}
+                </p>
+                <div className="text-sm space-y-1">
+                  <p>Total Matches: <span className="font-bold">{lastResult.matches}</span></p>
+                  <p>Total Bet: <span className="font-bold">{lastResult.totalBet} chips</span></p>
+                  {lastResult.winnings > 0 && (
+                    <p className="text-green-700 font-bold text-lg">
+                      Total Winnings: {lastResult.winnings} chips
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Current Status */}
+          <div className="text-center text-sm text-gray-600 space-y-1 p-3 bg-blue-50 rounded-lg">
+            <p>Available Chips: <span className="font-bold text-blue-700">{user.chips}</span></p>
+            {getSelectedColors().length > 0 && (
+              <p>
+                Betting on: <span className="font-medium text-blue-700">
+                  {getSelectedColors().map(color => `${color} (${colorBets[color]})`).join(', ')}
+                </span>
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+      <TransactionHistory user={user} filterType="casino" gameFilter="Color Game" />
+    </div>
   );
 };
 

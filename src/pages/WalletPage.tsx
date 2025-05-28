@@ -49,10 +49,11 @@ const WalletPage = () => {
   const [convertAmount, setConvertAmount] = useState(0);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [transactions, setTransactions] = useState([]);
 
   useEffect(() => {
     const loadUserData = async () => {
-      const savedUser = localStorage.getItem('casinoUser');
+      const savedUser = localStorage.getItem("casinoUser");
       if (!savedUser) {
         setUser(null);
         setIsLoading(false);
@@ -99,7 +100,14 @@ const WalletPage = () => {
           variant: "destructive",
         });
         // Don't remove user, allow offline mode
-        setUser(parsedUser);
+        const userWithDefaults = {
+          ...parsedUser,
+          coins: parsedUser.coins || 0,
+          chips: parsedUser.chips || 0,
+          isAdmin: parsedUser.isAdmin || parsedUser.is_admin || false
+        };
+        setUser(userWithDefaults);
+        localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
       } finally {
         setIsLoading(false);
         // Add extra time for data synchronization

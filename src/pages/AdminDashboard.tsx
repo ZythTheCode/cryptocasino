@@ -39,6 +39,7 @@ import {
   getAllTransactions,
   getPendingTopupRequests,
   updateTopupRequestStatus,
+  addTransaction,
   signIn
 } from '@/lib/database';
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
@@ -123,35 +124,18 @@ const AdminDashboard = () => {
 
   const loadData = async () => {
     try {
-      setIsLoading(true);
-
       // Load all data in parallel for better performance
       const [pendingRequests, users, transactions] = await Promise.all([
         getPendingTopupRequests().catch(err => {
           console.error('Error loading pending topups:', err);
-          toast({
-            title: "Warning",
-            description: "Failed to load pending topups",
-            variant: "destructive",
-          });
           return [];
         }),
         getAllUsers().catch(err => {
           console.error('Error loading users:', err);
-          toast({
-            title: "Warning", 
-            description: "Failed to load users",
-            variant: "destructive",
-          });
           return [];
         }),
         getAllTransactions(100).catch(err => {
           console.error('Error loading transactions:', err);
-          toast({
-            title: "Warning",
-            description: "Failed to load transactions", 
-            variant: "destructive",
-          });
           return [];
         })
       ]);
@@ -180,8 +164,6 @@ const AdminDashboard = () => {
         description: "Critical error loading data. Please refresh the page.",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -384,13 +366,16 @@ const AdminDashboard = () => {
     try {
       await banUser(userId);
 
+      // Immediately update the local state
+      setAllUsers(prev => prev.map(u => 
+        u.id === userId ? { ...u, is_banned: true } : u
+      ));
+
       toast({
         title: "User Banned",
         description: `${username} has been banned successfully`,
       });
 
-      // Force reload data immediately
-      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -404,13 +389,16 @@ const AdminDashboard = () => {
     try {
       await unbanUser(userId);
 
+      // Immediately update the local state
+      setAllUsers(prev => prev.map(u => 
+        u.id === userId ? { ...u, is_banned: false } : u
+      ));
+
       toast({
         title: "User Unbanned",
         description: `${username} has been unbanned successfully`,
       });
 
-      // Force reload data immediately
-      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -424,13 +412,14 @@ const AdminDashboard = () => {
     try {
       await deleteUser(userId);
 
+      // Immediately remove user from local state
+      setAllUsers(prev => prev.filter(u => u.id !== userId));
+
       toast({
         title: "User Deleted",
         description: `${username} has been deleted permanently`,
       });
 
-      // Force reload data immediately
-      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -443,6 +432,11 @@ const AdminDashboard = () => {
   const handleResetBalance = async (userId: string, username: string) => {
     try {
       await resetUserBalance(userId);
+
+      // Immediately update the local state
+      setAllUsers(prev => prev.map(u => 
+        u.id === userId ? { ...u, coins: 0, chips: 0 } : u
+      ));
 
       // Add transaction record
       await addTransaction({
@@ -458,8 +452,6 @@ const AdminDashboard = () => {
         description: `${username}'s balance has been reset to 0`,
       });
 
-      // Force reload data immediately
-      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -488,15 +480,46 @@ const AdminDashboard = () => {
     }
 
     try {
+      // Update user balance
       await addUserBalance(userId, coinsToAdd, chipsToAdd);
+
+      // Immediately update the local state for instant feedback
+      setAllUsers(prev => prev.map(u => 
+        u.id === userId 
+          ? { 
+              ...u, 
+              coins: (u.coins || 0) + coinsToAdd, 
+              chips: (u.chips || 0) + chipsToAdd 
+            }
+          : u
+      ));
+
+      // Add transaction record for tracking
+      if (coinsToAdd > 0) {
+        await addTransaction({
+          user_id: userId,
+          type: 'topup',
+          description: `Admin added ${coinsToAdd} checkels by ${user.username}`,
+          coins_amount: coinsToAdd,
+          amount: 0
+        });
+      }
+
+      if (chipsToAdd > 0) {
+        await addTransaction({
+          user_id: userId,
+          type: 'topup',
+          description: `Admin added ${chipsToAdd} chips by ${user.username}`,
+          chips_amount: chipsToAdd,
+          amount: chipsToAdd
+        });
+      }
 
       toast({
         title: "Balance Updated",
         description: `Added ${coinsToAdd} checkels and ${chipsToAdd} chips to ${username}`,
       });
 
-      // Force reload data immediately
-      await loadData();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -541,18 +564,19 @@ const AdminDashboard = () => {
           <div className="flex items-center space-x-3">
             <span className="text-white/90 font-medium">Admin: {user?.username}</span>
             <Button 
-              onClick={loadData} 
+              onClick={() => {
+                loadData();
+                toast({
+                  title: "Refreshed",
+                  description: "Data has been refreshed manually",
+                });
+              }} 
               variant="outline" 
               size="sm" 
-              disabled={isLoading}
               className="flex items-center space-x-2 bg-green-500/20 border-green-400/30 text-green-100 hover:bg-green-500/30"
               title="Manual refresh - Real-time updates are active"
             >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Activity className="w-4 h-4" />
-              )}
+              <Activity className="w-4 h-4" />
               <span>Manual Refresh</span>
             </Button>
             <Link to="/">
@@ -703,22 +727,28 @@ const AdminDashboard = () => {
                                     size="sm"
                                     className="border-orange-400 text-orange-600 hover:bg-orange-50"
                                   >
+                                    <Ban className="w-4 h-4 mr-1" />
                                     Ban User
                                   </Button>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-80">
                                   <div className="space-y-3">
-                                    <h4 className="font-medium text-red-600">Ban User</h4>
+                                    <h4 className="font-medium text-red-600 flex items-center">
+                                      <Ban className="w-4 h-4 mr-2" />
+                                      Ban User
+                                    </h4>
                                     <p className="text-sm text-gray-600">
-                                      Are you sure you want to ban user "{userData.username}"? This will prevent them from accessing the application.
+                                      This will prevent "{userData.username}" from accessing the application. They can be unbanned later.
                                     </p>
                                     <div className="flex space-x-2">
                                       <Button
                                         onClick={() => handleBanUser(userData.id, userData.username)}
                                         variant="destructive"
                                         size="sm"
+                                        className="flex items-center"
                                       >
-                                        Confirm Ban
+                                        <Ban className="w-4 h-4 mr-1" />
+                                        Ban User
                                       </Button>
                                     </div>
                                   </div>
@@ -741,22 +771,30 @@ const AdminDashboard = () => {
                                     size="sm"
                                     className="border-yellow-400 text-yellow-600 hover:bg-yellow-50"
                                   >
+                                    <RotateCcw className="w-4 h-4 mr-1" />
                                     Reset Balance
                                   </Button>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-80">
+                                <PopoverContent className="w-80 border-yellow-200">
                                   <div className="space-y-3">
-                                    <h4 className="font-medium text-yellow-600">Reset Balance</h4>
-                                    <p className="text-sm text-gray-600">
-                                      Are you sure you want to reset "{userData.username}"'s balance to 0?
-                                    </p>
+                                    <h4 className="font-medium text-yellow-600 flex items-center">
+                                      <RotateCcw className="w-4 h-4 mr-2" />
+                                      Reset Balance
+                                    </h4>
+                                    <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                                      <p className="text-sm text-yellow-800">
+                                        This will reset "{userData.username}"'s checkels and chips to 0. A transaction record will be created for tracking.
+                                      </p>
+                                    </div>
                                     <div className="flex space-x-2">
                                       <Button
                                         onClick={() => handleResetBalance(userData.id, userData.username)}
                                         variant="outline"
                                         size="sm"
+                                        className="border-yellow-400 text-yellow-600 hover:bg-yellow-50 flex items-center"
                                       >
-                                        Confirm Reset
+                                        <RotateCcw className="w-4 h-4 mr-1" />
+                                        Reset Balance
                                       </Button>
                                     </div>
                                   </div>
@@ -769,22 +807,31 @@ const AdminDashboard = () => {
                                     variant="destructive"
                                     size="sm"
                                   >
+                                    <Trash2 className="w-4 h-4 mr-1" />
                                     Delete User
                                   </Button>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-80">
+                                <PopoverContent className="w-80 border-red-200">
                                   <div className="space-y-3">
-                                    <h4 className="font-medium text-red-600">Delete User</h4>
-                                    <p className="text-sm text-gray-600">
-                                      Are you sure you want to permanently delete user "{userData.username}"? This action cannot be undone and will remove all their data.
-                                    </p>
+                                    <h4 className="font-medium text-red-600 flex items-center">
+                                      <Trash2 className="w-4 h-4 mr-2" />
+                                      Delete User Permanently
+                                    </h4>
+                                    <div className="bg-red-50 p-3 rounded-lg border border-red-200">
+                                      <p className="text-sm text-red-800 font-medium">⚠️ Warning: This action cannot be undone!</p>
+                                      <p className="text-sm text-red-700 mt-1">
+                                        This will permanently delete "{userData.username}" and all their data including transactions and progress.
+                                      </p>
+                                    </div>
                                     <div className="flex space-x-2">
                                       <Button
                                         onClick={() => handleDeleteUser(userData.id, userData.username)}
                                         variant="destructive"
                                         size="sm"
+                                        className="flex items-center"
                                       >
-                                        Confirm Delete
+                                        <Trash2 className="w-4 h-4 mr-1" />
+                                        Permanently Delete
                                       </Button>
                                     </div>
                                   </div>

@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { soundManager } from "@/utils/sounds";
+import TransactionHistory from "@/components/TransactionHistory";
 
 interface BlackjackProps {
   user: any;
@@ -260,115 +262,120 @@ const Blackjack = ({ user, onUpdateUser, onAddTransaction }: BlackjackProps) => 
   };
 
   return (
-    <Card className="w-full max-w-4xl mx-auto">
-      <CardHeader>
-        <CardTitle className="text-center flex items-center justify-center space-x-2">
-          <span className="text-2xl">♠️</span>
-          <span>Blackjack</span>
-          <span className="text-2xl">♥️</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-6">
-          {gameState === 'betting' && (
-            <div className="text-center space-y-4">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-lg font-semibold mb-2">Place Your Bet</p>
-                <p className="text-sm text-gray-600 mb-4">Get as close to 21 as possible without going over!</p>
-                <div className="flex items-center justify-center space-x-4">
-                  <label className="font-medium">Bet Amount:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max={user?.chips || 0}
-                    value={betAmount}
-                    onChange={(e) => setBetAmount(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-24 px-3 py-2 border rounded-lg text-center"
-                  />
-                  <span className="text-sm text-gray-600">chips</span>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="text-center flex items-center justify-center space-x-2">
+            <span className="text-2xl">♠️</span>
+            <span>Blackjack</span>
+            <span className="text-2xl">♥️</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
+            {gameState === 'betting' && (
+              <div className="text-center space-y-4">
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <p className="text-lg font-semibold mb-2">Place Your Bet</p>
+                  <p className="text-sm text-gray-600 mb-4">Get as close to 21 as possible without going over!</p>
+                  <div className="flex items-center justify-center space-x-4">
+                    <label className="font-medium">Bet Amount:</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max={user?.chips || 0}
+                      value={betAmount}
+                      onChange={(e) => setBetAmount(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-24 px-3 py-2 border rounded-lg text-center"
+                    />
+                    <span className="text-sm text-gray-600">chips</span>
+                  </div>
                 </div>
+                <Button 
+                  onClick={startGame} 
+                  className="px-8 py-3 text-lg bg-green-600 hover:bg-green-700"
+                  disabled={!user?.chips || betAmount > user.chips}
+                >
+                  Deal Cards
+                </Button>
               </div>
-              <Button 
-                onClick={startGame} 
-                className="px-8 py-3 text-lg bg-green-600 hover:bg-green-700"
-                disabled={!user?.chips || betAmount > user.chips}
-              >
-                Deal Cards
-              </Button>
-            </div>
-          )}
+            )}
 
-          {(gameState === 'playing' || gameState === 'finished') && (
-            <div className="space-y-6">
-              {/* Dealer's Hand */}
-              <div className="text-center">
-                <h3 className="text-lg font-semibold mb-2">Dealer's Hand {gameState === 'finished' && `(${dealerScore})`}</h3>
-                <div className="flex justify-center space-x-2 mb-2">
-                  {dealerHand.map((card, index) => (
-                    <div key={index}>
-                      {renderCard(card, gameState === 'playing' && index === 1)}
-                    </div>
-                  ))}
+            {(gameState === 'playing' || gameState === 'finished') && (
+              <div className="space-y-6">
+                {/* Dealer's Hand */}
+                <div className="text-center">
+                  <h3 className="text-lg font-semibold mb-2">Dealer's Hand {gameState === 'finished' && `(${dealerScore})`}</h3>
+                  <div className="flex justify-center space-x-2 mb-2">
+                    {dealerHand.map((card, index) => (
+                      <div key={index}>
+                        {renderCard(card, gameState === 'playing' && index === 1)}
+                      </div>
+                    ))}
+                  </div>
+                  {gameState === 'playing' && (
+                    <p className="text-sm text-gray-600">Showing: {dealerHand[0]?.numValue || 0}</p>
+                  )}
                 </div>
+
+                {/* Player's Hand */}
+                <div className="text-center">
+                  <h3 className="text-lg font-semibold mb-2">Your Hand ({playerScore})</h3>
+                  <div className="flex justify-center space-x-2 mb-4">
+                    {playerHand.map((card, index) => (
+                      <div key={index}>
+                        {renderCard(card)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Game Controls */}
                 {gameState === 'playing' && (
-                  <p className="text-sm text-gray-600">Showing: {dealerHand[0]?.numValue || 0}</p>
+                  <div className="flex justify-center space-x-4">
+                    <Button onClick={hit} className="px-6 py-2 bg-blue-600 hover:bg-blue-700">
+                      Hit
+                    </Button>
+                    <Button onClick={stand} className="px-6 py-2 bg-orange-600 hover:bg-orange-700">
+                      Stand
+                    </Button>
+                  </div>
+                )}
+
+                {gameState === 'finished' && (
+                  <div className="text-center space-y-4">
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h3 className="text-xl font-bold mb-2">{gameResult}</h3>
+                      <p className="text-sm text-gray-600">
+                        Your Score: {playerScore} | Dealer Score: {dealerScore}
+                      </p>
+                    </div>
+                    <Button onClick={resetGame} className="px-8 py-3 text-lg bg-green-600 hover:bg-green-700">
+                      Play Again
+                    </Button>
+                  </div>
                 )}
               </div>
+            )}
 
-              {/* Player's Hand */}
-              <div className="text-center">
-                <h3 className="text-lg font-semibold mb-2">Your Hand ({playerScore})</h3>
-                <div className="flex justify-center space-x-2 mb-4">
-                  {playerHand.map((card, index) => (
-                    <div key={index}>
-                      {renderCard(card)}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Game Controls */}
-              {gameState === 'playing' && (
-                <div className="flex justify-center space-x-4">
-                  <Button onClick={hit} className="px-6 py-2 bg-blue-600 hover:bg-blue-700">
-                    Hit
-                  </Button>
-                  <Button onClick={stand} className="px-6 py-2 bg-orange-600 hover:bg-orange-700">
-                    Stand
-                  </Button>
-                </div>
-              )}
-
-              {gameState === 'finished' && (
-                <div className="text-center space-y-4">
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h3 className="text-xl font-bold mb-2">{gameResult}</h3>
-                    <p className="text-sm text-gray-600">
-                      Your Score: {playerScore} | Dealer Score: {dealerScore}
-                    </p>
-                  </div>
-                  <Button onClick={resetGame} className="px-8 py-3 text-lg bg-green-600 hover:bg-green-700">
-                    Play Again
-                  </Button>
-                </div>
-              )}
+            {/* Game Rules */}
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <h4 className="font-semibold mb-2">How to Play:</h4>
+              <ul className="text-sm space-y-1 text-gray-700">
+                <li>• Get as close to 21 as possible without going over</li>
+                <li>• Aces count as 1 or 11, face cards count as 10</li>
+                <li>• Dealer must hit on 16 and stand on 17</li>
+                <li>• Blackjack (21 with 2 cards) pays 2.5:1</li>
+                <li>• Regular wins pay 2:1</li>
+              </ul>
             </div>
-          )}
-
-          {/* Game Rules */}
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <h4 className="font-semibold mb-2">How to Play:</h4>
-            <ul className="text-sm space-y-1 text-gray-700">
-              <li>• Get as close to 21 as possible without going over</li>
-              <li>• Aces count as 1 or 11, face cards count as 10</li>
-              <li>• Dealer must hit on 16 and stand on 17</li>
-              <li>• Blackjack (21 with 2 cards) pays 2.5:1</li>
-              <li>• Regular wins pay 2:1</li>
-            </ul>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      {/* Transaction History */}
+      <TransactionHistory user={user} filterType="casino" gameFilter="Blackjack" />
+    </div>
   );
 };
 

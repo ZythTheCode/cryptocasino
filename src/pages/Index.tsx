@@ -103,7 +103,7 @@ const Index = () => {
           return;
         }
 
-        setUser(userData);
+        setCurrentUser(userData);
         localStorage.setItem('casinoUser', JSON.stringify(userData));
 
         // Show loading state while syncing data
@@ -172,11 +172,37 @@ const Index = () => {
   };
 
   if (isLoading || isLoadingAfterLogin) {
+    const loadingMessage = isLoadingAfterLogin 
+      ? 'Loading your dashboard...' 
+      : isLogin 
+        ? 'Signing you in...' 
+        : 'Creating your account...';
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
-        <div className="flex items-center space-x-2 text-white">
-          <div className="w-6 h-6 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
-          <span>{isLoadingAfterLogin ? 'Syncing data...' : 'Loading...'}</span>
+        <div className="text-center">
+          <div className="flex items-center justify-center space-x-3 text-white mb-4">
+            <div className="w-8 h-8 border-3 border-white border-t-transparent animate-spin rounded-full"></div>
+            <span className="text-xl font-medium">{loadingMessage}</span>
+          </div>
+          {isLoadingAfterLogin && (
+            <div className="max-w-md mx-auto">
+              <div className="bg-white/10 backdrop-blur-lg rounded-lg p-4 border border-white/20">
+                <div className="flex items-center space-x-2 text-white/80">
+                  <div className="w-4 h-4 bg-green-400 rounded-full animate-pulse"></div>
+                  <span className="text-sm">Syncing account data</span>
+                </div>
+                <div className="flex items-center space-x-2 text-white/80 mt-2">
+                  <div className="w-4 h-4 bg-blue-400 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
+                  <span className="text-sm">Loading dashboard</span>
+                </div>
+                <div className="flex items-center space-x-2 text-white/80 mt-2">
+                  <div className="w-4 h-4 bg-purple-400 rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
+                  <span className="text-sm">Preparing your experience</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -304,34 +330,51 @@ const Index = () => {
   );
 };
 
-const WelcomeCard = ({ user }: any) => {
-  const calculateTreeLevel = (upgrades: any) => {
-    if (!upgrades) return 1;
-    // Check both possible tree upgrade sources
-    if (upgrades.treeLevel) return upgrades.treeLevel;
-    if (upgrades.tree_level) return upgrades.tree_level;
-    // Check if tree_upgrades array exists (from database joins)
-    if (user?.tree_upgrades && user.tree_upgrades.length > 0) {
-      return user.tree_upgrades[0].tree_level || 1;
-    }
-    return 1;
-  };
+const WelcomeCard = ({ user }: { user: any }) => {
+  const [treeLevel, setTreeLevel] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadTreeLevel = async () => {
+      if (!user?.id) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const { getTreeUpgrade } = await import('@/lib/database');
+        let upgrade = await getTreeUpgrade(user.id);
+
+        if (!upgrade) {
+          const { createTreeUpgrade } = await import('@/lib/database');
+          upgrade = await createTreeUpgrade(user.id);
+        }
+
+        setTreeLevel(upgrade.tree_level || 1);
+      } catch (error) {
+        console.error('Error loading tree level:', error);
+        setTreeLevel(1); // Default fallback
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadTreeLevel();
+  }, [user?.id]);
 
   const getTreeImage = (level: number) => {
-    if (level >= 80) return "🌳";
-    if (level >= 60) return "🌲";
-    if (level >= 40) return "🌱";
-    if (level >= 20) return "🪴";
-    return "🌿";
+    if (level >= 80) return "🌳"; // Ancient Tree
+    if (level >= 60) return "🌲"; // Mature Tree
+    if (level >= 40) return "🌱"; // Growing Tree
+    if (level >= 20) return "🪴"; // Young Tree
+    return "🌿"; // Seedling
   };
-
-  const level = calculateTreeLevel(user?.upgrades);
 
   return (
     <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 shadow-lg">
       <CardHeader>
         <CardTitle className="text-green-700 flex items-center space-x-2">
-          <span className="text-2xl">{getTreeImage(level)}</span>
+          <span className="text-2xl">{getTreeImage(treeLevel)}</span>
           <span>Welcome Back!</span>
         </CardTitle>
       </CardHeader>
@@ -343,7 +386,7 @@ const WelcomeCard = ({ user }: any) => {
           <div className="bg-white p-3 rounded border">
             <p className="text-sm text-gray-600">Your Tree Status</p>
             <p className="font-bold text-lg text-green-600">
-              Level {level}
+              {isLoading ? "Loading..." : `Level ${treeLevel}`}
             </p>
           </div>
           <Link to="/tree">
@@ -1229,11 +1272,37 @@ const Authentication = () => {
   };
 
   if (isLoading || isLoadingAfterLogin) {
+    const loadingMessage = isLoadingAfterLogin 
+      ? 'Loading your dashboard...' 
+      : isLogin 
+        ? 'Signing you in...' 
+        : 'Creating your account...';
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
-        <div className="flex items-center space-x-2 text-white">
-          <div className="w-6 h-6 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
-          <span>{isLoadingAfterLogin ? 'Syncing data...' : 'Loading...'}</span>
+        <div className="text-center">
+          <div className="flex items-center justify-center space-x-3 text-white mb-4">
+            <div className="w-8 h-8 border-3 border-white border-t-transparent animate-spin rounded-full"></div>
+            <span className="text-xl font-medium">{loadingMessage}</span>
+          </div>
+          {isLoadingAfterLogin && (
+            <div className="max-w-md mx-auto">
+              <div className="bg-white/10 backdrop-blur-lg rounded-lg p-4 border border-white/20">
+                <div className="flex items-center space-x-2 text-white/80">
+                  <div className="w-4 h-4 bg-green-400 rounded-full animate-pulse"></div>
+                  <span className="text-sm">Syncing account data</span>
+                </div>
+                <div className="flex items-center space-x-2 text-white/80 mt-2">
+                  <div className="w-4 h-4 bg-blue-400 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
+                  <span className="text-sm">Loading dashboard</span>
+                </div>
+                <div className="flex items-center space-x-2 text-white/80 mt-2">
+                  <div className="w-4 h-4 bg-purple-400 rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
+                  <span className="text-sm">Preparing your experience</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

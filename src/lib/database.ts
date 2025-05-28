@@ -17,32 +17,107 @@ export async function signUp(username: string, password: string) {
     .select()
     .single()
 
-  if (error) throw error
+  if (error) {
+    if (error.code === '23505') { // Unique constraint violation
+      throw new Error('This username is already taken. Please choose a different username.');
+    }
+    throw new Error('Unable to create your account right now. Please try again in a moment.');
+  }
   return data
 }
 
-export async function signIn(username: string, password: string) {
-  console.log('Attempting to sign in user:', username);
-
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('username', username)
-    .eq('password_hash', password) // In production, verify hashed password
-    .single() // This ensures we get a single object, not an array
-
-  if (error) {
-    console.error('Sign in error:', error);
-    if (error.code === 'PGRST116') {
-      // No rows returned - user doesn't exist or wrong password
-      throw new Error('Invalid username or password')
-    }
-    throw error
+export const createDefaultAdmin = async () => {
+  if (!supabase) {
+    throw new Error('Database connection not available. Please check configuration.');
   }
 
-  console.log('Sign in successful for user:', data.username, 'Admin:', data.is_admin);
-  return data
-}
+  try {
+    // Check if admin already exists
+    const { data: existingAdmin, error: checkError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('username', 'admin')
+      .limit(1);
+
+    if (checkError) throw checkError;
+
+    if (existingAdmin && existingAdmin.length > 0) {
+      return existingAdmin[0]; // Admin already exists
+    }
+
+    // Create default admin user
+    const { data: newAdmin, error: createError } = await supabase
+      .from('users')
+      .insert([{
+        username: 'admin',
+        password_hash: 'admin123',
+        is_admin: true,
+        coins: 1000000,
+        chips: 1000000,
+        is_banned: false
+      }])
+      .select()
+      .single();
+
+    if (createError) throw createError;
+
+    return newAdmin;
+  } catch (error: any) {
+    console.error('Create admin error:', error);
+    throw new Error('Failed to create admin account');
+  }
+};
+
+export const signIn = async (username: string, password: string) => {
+  if (!supabase) {
+    throw new Error('Unable to connect to the server. Please try again later.');
+  }
+
+  try {
+    // Try to create default admin if it doesn't exist
+    if (username === 'admin') {
+      await createDefaultAdmin();
+    }
+
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .limit(1);
+
+    if (error) throw error;
+
+    if (!users || users.length === 0) {
+      throw new Error('We couldn\'t find an account with that username. Please double-check your username or create a new account.');
+    }
+
+    const user = users[0];
+
+    // Check if password matches (simple comparison for now)
+    if (user.password_hash !== password) {
+      throw new Error('The password you entered is incorrect. Please check your password and try again.');
+    }
+
+    if (user.is_banned) {
+      throw new Error('Your account has been suspended. Please contact support for assistance.');
+    }
+
+    // Update last login time
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+
+    if (updateError) {
+      console.warn('Failed to update last login time:', updateError);
+    }
+
+    return user;
+  } catch (error: any) {
+    console.error('SignIn error:', error);
+    throw new Error(error.message || 'Something went wrong during login. Please try again.');
+  }
+};
 
 // Top-up and Withdrawal functions
 export async function createTopupRequest(requestData: {
@@ -363,9 +438,9 @@ export async function saveTreeState(userId: string, currentCheckels: number, lea
     last_leave_time: leaveTime.toISOString(),
     offline_generation_active: true
   }
-  
+
   localStorage.setItem(`treeState_${userId}`, JSON.stringify(treeState))
-  
+
   // Try to update database if possible, but don't fail if columns don't exist
   if (supabase) {
     try {
@@ -384,7 +459,7 @@ export async function saveTreeState(userId: string, currentCheckels: number, lea
 export async function clearOfflineGeneration(userId: string) {
   // Clear from localStorage
   localStorage.removeItem(`treeState_${userId}`)
-  
+
   // Try to update database if possible
   if (supabase) {
     try {
