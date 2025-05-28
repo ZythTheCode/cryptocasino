@@ -118,14 +118,27 @@ const WalletPage = () => {
       const subscription = supabase
         .channel(`wallet_transactions_${user.id}_${Date.now()}`)
         .on('postgres_changes', {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'transactions',
           filter: `user_id=eq.${user.id}`
         }, (payload) => {
           console.log('Wallet transaction change detected:', payload);
-          if (['conversion', 'chip_conversion', 'topup', 'withdrawal'].includes(payload.new?.type)) {
+          if (['conversion', 'chip_conversion', 'topup', 'withdrawal'].includes(payload.new?.type || payload.old?.type)) {
             loadTransactions(user.id);
+          }
+        })
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'users',
+          filter: `id=eq.${user.id}`
+        }, (payload) => {
+          console.log('User balance change detected:', payload);
+          if (payload.new) {
+            const updatedUser = { ...user, ...payload.new };
+            localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+            setUser(updatedUser);
           }
         })
         .subscribe();
@@ -771,7 +784,7 @@ const WithdrawSection = ({ user }: any) => {
             <>
               <Minus className="w-4 h-4 mr-2" />
               Submit Withdrawal Request
-            </Minus>
+            </>
           )}
         </Button>
       </CardContent>

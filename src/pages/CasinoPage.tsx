@@ -192,7 +192,7 @@ const CasinoPage = () => {
 
           {/* Right Sidebar - Transaction History (wider) */}
           <div className="xl:col-span-2">
-            <TransactionHistory user={user} />
+            <TransactionHistory user={user} filterType="casino" />
           </div>
         </div>
       </div>
@@ -625,128 +625,6 @@ const AdminPanel = () => {
   );
 };
 
-const TransactionHistory = ({ user }: any) => {
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const { toast } = useToast();
-
-  useEffect(() => {
-    const loadTransactions = async () => {
-      if (user?.id) {
-        try {
-          setIsLoading(true);
-          const { getUserTransactions } = await import('@/lib/database');
-          const dbTransactions = await getUserTransactions(user.id, 50);
-
-          // Filter only casino-related transactions
-          const casinoTransactions = dbTransactions.filter((tx: any) => 
-            tx.game || tx.type === 'bet' || tx.type === 'win' || tx.type === 'refund'
-          );
-
-          // Format transactions for display
-          const formattedTransactions = casinoTransactions.map((tx: any) => ({
-            ...tx,
-            timestamp: new Date(tx.created_at).getTime(),
-            description: tx.description || `${tx.type} transaction`
-          }));
-
-          setTransactions(formattedTransactions);
-        } catch (error) {
-          console.error('Error loading casino transactions from Supabase:', error);
-          toast({
-            title: "Warning",
-            description: "Failed to load transaction history",
-            variant: "destructive",
-          });
-          setTransactions([]);
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    loadTransactions();
-
-    // Set up real-time subscription for casino transactions
-    if (user?.id && supabase) {
-      const subscription = supabase
-        .channel(`casino_transactions_${user.id}_${Date.now()}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'transactions',
-          filter: `user_id=eq.${user.id}`
-        }, (payload) => {
-          console.log('Casino transaction change detected:', payload);
-          // Only reload if it's a casino-related transaction
-          if (payload.new?.game || ['bet', 'win', 'loss'].includes(payload.new?.type)) {
-            loadTransactions();
-          }
-        })
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(subscription);
-      };
-    }
-  }, [user?.id]);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <DollarSign className="w-6 h-6 text-green-500" />
-          <span>Transaction History</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2 max-h-60 overflow-y-auto">
-          {isLoading ? (
-            <div className="text-center py-4">
-              <span className="text-gray-500 text-sm">Loading transactions...</span>
-            </div>
-          ) : (
-            <>
-              {transactions.slice(0, 50).map((transaction, index) => (
-                <div
-                  key={`${transaction.id || index}-${transaction.timestamp}`}
-                  className="p-2 bg-white rounded border text-sm flex justify-between items-center"
-                >
-                  <div className="flex-1">
-                    <p className="font-medium">
-                      {transaction.game && `${transaction.game} - `}
-                      {transaction.description}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {new Date(transaction.created_at || transaction.timestamp).toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    {transaction.type === 'conversion' ? (
-                      <div>
-                        <p className="text-xs text-red-600">-{(transaction.coins_amount || 0).toFixed(2)} ₵</p>
-                        <p className="text-xs text-green-600">+{(transaction.chips_amount || 0).toFixed(2)} chips</p>
-                      </div>
-                    ) : (
-                      <div className={`font-bold ${(transaction.amount || 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
-                        {(transaction.amount || 0) >= 0 ? "+" : ""}
-                        {(transaction.amount || 0).toFixed(2)} Chips
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {transactions.length === 0 && (
-                <p className="text-center text-gray-500 text-sm py-4">
-                  No transactions yet
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
+import TransactionHistory from "@/components/TransactionHistory";
 
 export default CasinoPage;

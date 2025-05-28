@@ -37,6 +37,9 @@ export interface TreeUpgrade {
   user_id: string
   tree_level: number
   last_claim: string
+  current_checkels?: number
+  last_leave_time?: string
+  offline_generation_active?: boolean
   created_at: string
   updated_at: string
 }

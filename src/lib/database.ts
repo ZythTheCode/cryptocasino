@@ -341,11 +341,64 @@ export async function updateTreeUpgrade(userId: string, updates: Partial<TreeUpg
     })
     .eq('user_id', userId)
     .select()
-    .order('created_at', { ascending: false })
-    .limit(1)
+    .single()
 
   if (error) throw error
-  return data && data.length > 0 ? data[0] : existing
+  return data
+}
+
+export async function saveTreeState(userId: string, currentCheckels: number, leaveTime: Date) {
+  if (!supabase) {
+    console.warn('Supabase not available, cannot save tree state');
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('tree_upgrades')
+      .update({
+        current_checkels: Math.max(0, currentCheckels),
+        last_leave_time: leaveTime.toISOString(),
+        offline_generation_active: true,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  } catch (error) {
+    console.error('Error saving tree state:', error);
+    throw error;
+  }
+}
+
+export async function clearOfflineGeneration(userId: string) {
+  if (!supabase) {
+    console.warn('Supabase not available, cannot clear offline generation');
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('tree_upgrades')
+      .update({
+        current_checkels: 0,
+        last_leave_time: null,
+        offline_generation_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  } catch (error) {
+    console.error('Error clearing offline generation:', error);
+    throw error;
+  }
 }
 
 // Transaction functions
@@ -413,86 +466,7 @@ export async function getAllTransactions(limit = 100) {
 
 
 
-// Top-up functions
-export async function createTopupRequest(request: any) {
-  try {
-    const { data, error } = await supabase
-      .from('topup_requests')
-      .insert([{
-        user_id: request.user_id,
-        amount: request.amount,
-        payment_method: request.payment_method,
-        reference: request.reference || request.reference_number,
-        notes: request.notes,
-        receipt_data: request.receipt_data,
-        status: request.status || 'pending'
-      }])
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
-  } catch (error) {
-    console.error('Error creating topup request:', error)
-    throw error
-  }
-}
-
-export async function getPendingTopupRequests() {
-  const { data, error } = await supabase
-    .from('topup_requests')
-    .select(`
-      *,
-      users!topup_requests_user_id_fkey(username)
-    `)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    console.error('Error fetching pending topup requests:', error)
-    throw error
-  }
-
-  // Process the data to flatten user information
-  const processedData = data?.map(request => ({
-    ...request,
-    username: request.users?.username || request.username
-  })) || []
-
-  return processedData
-}
-
-export async function updateTopupRequestStatus(
-  requestId: string, 
-  status: 'approved' | 'rejected', 
-  processedBy: string
-) {
-  const { data, error } = await supabase
-    .from('topup_requests')
-    .update({ 
-      status, 
-      processed_by: processedBy, 
-      processed_at: new Date().toISOString() 
-    })
-    .eq('id', requestId)
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
 // Withdrawal functions
-export async function createWithdrawalRequest(request: Omit<WithdrawalRequest, 'id' | 'created_at' | 'status'>) {
-  const { data, error } = await supabase
-    .from('withdrawal_requests')
-    .insert([{ ...request, status: 'completed' }])
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
 
 export async function getUserWithdrawals(userId: string) {
   const { data, error } = await supabase
