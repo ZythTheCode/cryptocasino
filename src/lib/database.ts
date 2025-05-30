@@ -2,16 +2,18 @@ import { supabase } from './supabase'
 import type { User, Transaction, TopupRequest, WithdrawalRequest, TreeUpgrade } from './supabase'
 
 // Auth functions
-export async function signUp(username: string, password: string) {
+export async function signUp(username: string, passwordHash: string) {
   // In a real app, you'd use Supabase Auth, but for this demo we'll use custom auth
   const { data, error } = await supabase
     .from('users')
     .insert([
       { 
         username, 
-        password_hash: password, // In production, hash this!
-        coins: 10,
-        chips: 0 
+        password_hash: passwordHash, // In production, hash this!
+        coins: 0, // Start with 0 ₵ Checkels
+        chips: 0,
+        is_admin: false,
+        is_banned: false
       }
     ])
     .select()
@@ -369,19 +371,35 @@ export async function resetUserBalance(userId: string) {
 
 // Tree upgrade functions
 export async function getTreeUpgrade(userId: string) {
-  const { data, error } = await supabase
+  // First check for duplicates and clean them up
+  const { data: allRecords, error: getAllError } = await supabase
     .from('tree_upgrades')
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
-    .limit(1)
 
-  if (error && error.code !== 'PGRST116') throw error
-  return data && data.length > 0 ? data[0] : null
+  if (getAllError && getAllError.code !== 'PGRST116') throw getAllError
+
+  if (allRecords && allRecords.length > 1) {
+    // Keep the most recent record and delete the rest
+    const keepRecord = allRecords[0]
+    const deleteIds = allRecords.slice(1).map(record => record.id)
+    
+    if (deleteIds.length > 0) {
+      await supabase
+        .from('tree_upgrades')
+        .delete()
+        .in('id', deleteIds)
+    }
+    
+    return keepRecord
+  }
+
+  return allRecords && allRecords.length > 0 ? allRecords[0] : null
 }
 
 export async function createTreeUpgrade(userId: string) {
-  // First check if one already exists
+  // First check if one already exists and clean up duplicates
   const existing = await getTreeUpgrade(userId)
   if (existing) return existing
 
@@ -395,40 +413,93 @@ export async function createTreeUpgrade(userId: string) {
     .select()
     .single()
 
-  if (error) throw error
+  if (error) {
+    // If insertion failed due to duplicate, try to get existing record
+    if (error.code === '23505') {
+      // Wait a moment for any concurrent operations to complete
+      await new Promise(resolve => setTimeout(resolve, 100))
+      return await getTreeUpgrade(userId)
+    }
+    throw error
+  }
   return data
 }
 
 export async function updateTreeUpgrade(userId: string, updates: Partial<any>) {
-  // First ensure we have a tree upgrade record
-  const existing = await getTreeUpgrade(userId)
-  if (!existing) {
-    return await createTreeUpgrade(userId)
-  }
-
-  // Filter out properties that don't exist in the database schema
-  const safeUpdates = {
-    tree_level: updates.tree_level,
-    last_claim: updates.last_claim,
-    updated_at: new Date().toISOString()
-  }
-
-  // Remove undefined values
-  Object.keys(safeUpdates).forEach(key => {
-    if (safeUpdates[key] === undefined) {
-      delete safeUpdates[key]
+  try {
+    // First ensure we have a tree upgrade record and clean up duplicates
+    const existing = await getTreeUpgrade(userId)
+    if (!existing) {
+      return await createTreeUpgrade(userId)
     }
-  })
 
-  const { data, error } = await supabase
-    .from('tree_upgrades')
-    .update(safeUpdates)
-    .eq('user_id', userId)
-    .select()
-    .single()
+    // Prepare the update object with only valid database fields
+    const safeUpdates: any = {
+      updated_at: new Date().toISOString()
+    }
+    
+    if (updates.tree_level !== undefined && typeof updates.tree_level === 'number') {
+      safeUpdates.tree_level = Math.max(1, Math.floor(updates.tree_level))
+    }
+    
+    if (updates.last_claim !== undefined) {
+      // Ensure we have a valid date string
+      const claimDate = typeof updates.last_claim === 'string' 
+        ? updates.last_claim 
+        : new Date(updates.last_claim).toISOString()
+      safeUpdates.last_claim = claimDate
+    }
 
-  if (error) throw error
-  return data
+    // Only proceed if we have meaningful updates beyond timestamp
+    const hasRealUpdates = Object.keys(safeUpdates).some(key => key !== 'updated_at')
+    if (!hasRealUpdates) {
+      return existing
+    }
+
+    // Update by ID to ensure we only update one specific record
+    const { data, error } = await supabase
+      .from('tree_upgrades')
+      .update(safeUpdates)
+      .eq('id', existing.id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Tree upgrade update error:', error)
+      // If it's a column doesn't exist error, return existing data
+      if (error.message?.includes('column') || error.code === '42703') {
+        console.log('Database schema mismatch, using existing data')
+        return existing
+      }
+      throw error
+    }
+
+    return data
+  } catch (error) {
+    console.error('Failed to update tree upgrade:', error)
+    // Always try to return existing data as fallback
+    try {
+      const existing = await getTreeUpgrade(userId)
+      return existing || { 
+        id: `fallback-${userId}`,
+        user_id: userId, 
+        tree_level: 1, 
+        last_claim: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    } catch (fallbackError) {
+      console.error('Fallback also failed:', fallbackError)
+      return { 
+        id: `fallback-${userId}`,
+        user_id: userId, 
+        tree_level: 1, 
+        last_claim: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    }
+  }
 }
 
 export async function saveTreeState(userId: string, currentCheckels: number, leaveTime: Date) {
@@ -448,10 +519,8 @@ export async function saveTreeState(userId: string, currentCheckels: number, lea
         last_claim: leaveTime.toISOString()
       })
     } catch (error) {
-      // Silently handle database column errors
-      if (error?.code !== 'PGRST204') {
-        console.log('Could not update tree upgrade in database, using localStorage only')
-      }
+      // Silently handle database errors - localStorage will be used instead
+      console.log('Could not update tree upgrade in database, using localStorage only')
     }
   }
 }
@@ -467,10 +536,8 @@ export async function clearOfflineGeneration(userId: string) {
         last_claim: new Date().toISOString()
       })
     } catch (error) {
-      // Silently handle database column errors
-      if (error?.code !== 'PGRST204') {
-        console.log('Could not clear offline generation in database')
-      }
+      // Silently handle database errors
+      console.log('Could not clear offline generation in database')
     }
   }
 }

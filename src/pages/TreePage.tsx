@@ -1280,14 +1280,7 @@ const TransactionHistory = ({ user }: any) => {
       loadTransactions();
     }
 
-    // Set up auto-refresh every 5 seconds for immediate updates
-    refreshIntervalRef.current = setInterval(() => {
-      if (user?.id) {
-        loadTransactions();
-      }
-    }, 5000);
-
-    // Set up real-time subscription for immediate updates
+    // Set up real-time subscription for immediate updates only
     if (user?.id && supabase) {
       const subscription = supabase
         .channel(`tree_transactions_realtime_${user.id}_${Date.now()}`)
@@ -1332,18 +1325,9 @@ const TransactionHistory = ({ user }: any) => {
         .subscribe();
 
       return () => {
-        if (refreshIntervalRef.current) {
-          clearInterval(refreshIntervalRef.current);
-        }
         supabase.removeChannel(subscription);
       };
     }
-
-    return () => {
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current);
-      }
-    };
   }, [user?.id]);
 
   return (

@@ -90,14 +90,7 @@ const TransactionHistory = ({ user, filterType = 'all', gameFilter, maxItems = 5
       loadTransactions();
     }
 
-    // Set up auto-refresh every 10 seconds
-    refreshIntervalRef.current = setInterval(() => {
-      if (user?.id) {
-        loadTransactions();
-      }
-    }, 10000);
-
-    // Set up real-time subscription for immediate updates
+    // Set up real-time subscription for immediate updates only
     if (user?.id && supabase) {
       const subscription = supabase
         .channel(`transactions_realtime_${filterType}_${user.id}_${Date.now()}`)
@@ -111,7 +104,7 @@ const TransactionHistory = ({ user, filterType = 'all', gameFilter, maxItems = 5
 
           if (payload.eventType === 'INSERT' && payload.new) {
             // Check if this transaction should be included in our filter
-            const shouldInclude = filterTransactions([payload.new], filterType).length > 0;
+            const shouldInclude = filterTransactions([payload.new], filterType, gameFilter).length > 0;
 
             if (shouldInclude) {
               const newTransaction = {
@@ -124,7 +117,7 @@ const TransactionHistory = ({ user, filterType = 'all', gameFilter, maxItems = 5
             }
           } else if (payload.eventType === 'UPDATE' && payload.new) {
             // Check if this transaction should be included in our filter
-            const shouldInclude = filterTransactions([payload.new], filterType).length > 0;
+            const shouldInclude = filterTransactions([payload.new], filterType, gameFilter).length > 0;
 
             if (shouldInclude) {
               setTransactions(prev => 
@@ -141,19 +134,10 @@ const TransactionHistory = ({ user, filterType = 'all', gameFilter, maxItems = 5
         .subscribe();
 
       return () => {
-        if (refreshIntervalRef.current) {
-          clearInterval(refreshIntervalRef.current);
-        }
         supabase.removeChannel(subscription);
       };
     }
-
-    return () => {
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current);
-      }
-    };
-  }, [user?.id, filterType, maxItems]);
+  }, [user?.id, filterType, gameFilter, maxItems]);
 
   const formatAmount = (transaction: any) => {
     if (transaction.type === 'conversion' && transaction.coins_amount && transaction.chips_amount) {
