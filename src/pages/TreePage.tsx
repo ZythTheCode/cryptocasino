@@ -337,7 +337,7 @@ const TreePage = () => {
                 </span>
               </div>
             </div>
-            
+
             <div className="flex items-center space-x-3">
               <span className="hidden md:block text-white/90 font-medium">Welcome, {user?.username}</span>
               <div className="hidden md:flex space-x-2">
@@ -372,7 +372,7 @@ const TreePage = () => {
                   </Button>
                 </Link>
               </div>
-              
+
               <MobileNavigation user={user} currentPage="/tree" />
             </div>
           </div>
@@ -470,7 +470,7 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
 
             setCurrentCheckels(totalCheckels);
             setOfflineGenerated(offlineGeneration);
-            
+
             // Set last claim time to maintain the total elapsed time continuity
             const adjustedClaimTime = returnTime - (cappedTotalTime * 1000);
             setLastClaimTime(adjustedClaimTime);
@@ -595,9 +595,9 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
             session_start_time: new Date(lastClaimTime).toISOString(),
             offline_generation_active: true
           };
-          
+
           localStorage.setItem(`treeState_${user.id}`, JSON.stringify(treeState));
-          
+
           await saveTreeState(user.id, currentCheckels, new Date());
         } catch (error) {
           console.error('Error saving tree state:', error);
@@ -707,12 +707,12 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
           <div className="space-y-4">
             <div className="text-center p-4 bg-white rounded-lg border">
               <p className="text-2xl font-bold text-green-600">
-                ₵{currentCheckels.toFixed(4)}
+                ₵{currentCheckels.toFixed(5)}
               </p>
               <p className="text-sm text-gray-600">Current Checkels</p>
               {offlineGenerated > 0 && (
                 <p className="text-xs text-blue-600 mt-1">
-                  +{offlineGenerated.toFixed(4)} while away
+                  +{offlineGenerated.toFixed(5)} while away
                 </p>
               )}
             </div>
@@ -1291,7 +1291,7 @@ const TransactionHistory = ({ user }: any) => {
           filter: `user_id=eq.${user.id}`
         }, (payload) => {
           console.log('Tree transaction change detected:', payload);
-          
+
           // Check if it's a tree-related transaction
           const isTreeTransaction = payload.new?.description?.includes('tree') || 
               payload.new?.description?.includes('Claimed Checkels') ||
