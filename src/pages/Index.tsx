@@ -1,22 +1,31 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  Home, 
+  Coins, 
+  CreditCard, 
+  Gamepad2,
+  Leaf,
+  Settings,
+  TrendingUp,
+  Users,
+  Crown,
+  Wallet,
+  LogOut,
+  Menu,
+  X,
+  TreePine
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { signIn, signUp } from '@/lib/database';
+import { supabase } from '@/lib/supabase';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Gamepad2, 
-  Wallet, 
-  TreePine, 
-  Settings, 
-  Home,
-  CreditCard
-} from "lucide-react";
-import { Link } from "react-router-dom";
-import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
-import { signIn, signUp } from "@/lib/database";
-import { supabase } from '@/lib/supabase'
 import { useLocation, useNavigate } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import MobileNavigation from "@/components/MobileNavigation";
@@ -500,10 +509,50 @@ const AdminPanel = () => {
   }, [activeTab]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
+    const loadUserAndSetupRealtime = async () => {
+      const savedUser = localStorage.getItem('casinoUser');
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+
+        try {
+          // Refresh user data from database to get latest balance
+          const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+          setUser(freshUser);
+          localStorage.setItem('casinoUser', JSON.stringify(freshUser));
+
+          // Set up real-time subscription for balance updates
+          if (supabase && freshUser.id) {
+            const subscription = supabase
+              .channel(`user_balance_realtime_${freshUser.id}_${Date.now()}`)
+              .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'users',
+                filter: `id=eq.${freshUser.id}`
+              }, (payload) => {
+                console.log('User balance updated in real-time:', payload);
+                const updatedUser = { ...freshUser, ...payload.new };
+                setUser(updatedUser);
+                localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
+              })
+              .subscribe();
+
+            // Cleanup subscription on unmount
+            return () => {
+              subscription.unsubscribe();
+            };
+          }
+        } catch (error) {
+          console.error('Failed to refresh user data:', error);
+          setUser(parsedUser); // Fallback to cached user
+        }
+      } else {
+        // Redirect to login if no user found
+        window.location.href = '/login';
+      }
+    };
+
+    loadUserAndSetupRealtime();
   }, []);
 
   const loadUsersFromSupabase = async () => {
@@ -865,8 +914,96 @@ const AdminPanel = () => {
                   ))}
               </div>
             </div>
-          ```python
 
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "users") {
+    return (
+      <Card className="border-red-200 bg-gradient-to-br from-red-50 to-orange-50 lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between text-red-700">
+            <span className="flex items-center space-x-2">
+              <Settings className="w-6 h-6" />
+              <span>👥 User Management</span>
+            </span>
+            <Button size="sm" variant="outline" onClick={() => setActiveTab("overview")}>
+              Back to Overview
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {isLoading ? (
+              <div className="text-center py-8">
+                <span className="text-lg">Loading users...</span>
+              </div>
+            ) : (
+              users.map((userData: any) => (
+                <div key={userData.id} className={`p-4 bg-white rounded-lg border shadow-sm ${userData.is_banned ? 'border-red-300 bg-red-50' : ''}`}>
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h3 className="font-bold text-lg flex items-center space-x-2">
+                        <span>{userData.username}</span>
+                        {userData.is_admin && <span className="text-red-500 text-xs bg-red-100 px-2 py-1 rounded">Admin</span>}
+                        {userData.is_banned && <span className="text-red-600 text-xs bg-red-100 px-2 py-1 rounded">🚫 Banned</span>}
+                      </h3>
+                      <div className="text-sm text-gray-600 grid grid-cols-2 gap-2 mt-1">
+                        <span>₵ Checkels: <span className="font-medium text-yellow-600">{(userData.coins || 0).toFixed(2)}</span></span>
+                        <span>Chips: <span className="font-medium text-green-600">{(userData.chips || 0).toFixed(2)}</span></span>
+                      </div>
+                      <div className="text-right text-sm text-gray-500 mt-2">
+                        <p>Total Value: ₱{((userData.chips || 0) * 10).toFixed(2)}</p>
+                        <p>Joined: {new Date(userData.created_at).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col space-y-2 ml-4">
+                      {!userData.is_admin && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAddBalance(userData.id, userData.username)}
+                            disabled={isLoading}
+                          >
+                            💰 Add Balance
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={userData.is_banned ? "default" : "destructive"}
+                            onClick={() => handleBanUser(userData.id, userData.username)}
+                            disabled={isLoading}
+                          >
+                            {userData.is_banned ? "✅ Unban" : "🚫 Ban"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleResetBalance(userData.id, userData.username)}
+                            disabled={isLoading}
+                          >
+                            🔄 Reset Balance
+                          </Button>
+                          {userData.is_admin && (
+                            <Button 
+                              size="sm" 
+                              variant="destructive"
+                              onClick={() => handleDeleteUser(userData.id, userData.username)}
+                              disabled={isLoading}
+                            >
+                              🗑️ Delete User
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>
@@ -970,8 +1107,6 @@ const AdminPanel = () => {
               ))
             )}
           </div>
-
-
         </CardContent>
       </Card>
     );
@@ -1008,111 +1143,93 @@ const AdminPanel = () => {
               <Button
                 variant="destructive"
                 onClick={handleResetAdminAccount}
-                className="bg-orange-600 hover:bg-orange-700"
+                className="w-full mb-4"
+                disabled={isLoading}
               >
-                🔄 Reset My Admin Account for Testing
+                🔄 Reset My Admin Account
               </Button>
-            </div>
+              
+              <div className="border-t pt-4">
+                <h3 className="font-bold text-lg mb-4 text-gray-700">💥 Mass Operations</h3>
+                <div className="space-y-3">
+                  <Button
+                    variant="destructive"
+                    onClick={async () => {
+                      if (!confirm("This will reset ALL non-admin users' balances to 0. Continue?")) return;
 
-            <div className="bg-white p-6 rounded-lg border shadow-sm">
-              <h3 className="font-bold text-lg mb-4 text-gray-700">🎮 Quick Actions</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <Button
-                  variant="outline"
-                  onClick={() => handleAddCoins(currentUser.id, currentUser.username, 10000)}
-                  className="bg-green-50 hover:bg-green-100 border-green-200"
-                  disabled={isLoading}
-                >
-                  Give Myself 10,000 ₵ Checkels
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleAddChips(currentUser.id, currentUser.username, 10000)}
-                  className="bg-purple-50 hover:bg-purple-100 border-purple-200"
-                  disabled={isLoading}
-                >
-                  Give Myself 10,000 Chips
-                </Button>
-              </div>
-            </div>
+                      try {
+                        setIsLoading(true);
+                        const { resetUserBalance, addTransaction } = await import('@/lib/database');
 
-            <div className="bg-white p-6 rounded-lg border shadow-sm">
-              <h3 className="font-bold text-lg mb-4 text-gray-700">⚠️ Danger Zone</h3>
-              <div className="space-y-3">
-                <Button
-                  variant="destructive"
-                  onClick={async () => {
-                    if (!confirm("This will reset ALL non-admin users' balances to 0. Continue?")) return;
+                        let resetCount = 0;
+                        // Reset all non-admin users
+                        for (const user of users) {
+                          if (!user.is_admin) {
+                            try {
+                              console.log(`Resetting balance for user: ${user.username} (${user.id})`);
+                              await resetUserBalance(user.id);
 
-                    try {
-                      setIsLoading(true);
-                      const { resetUserBalance, addTransaction } = await import('@/lib/database');
+                              // Add transaction record
+                              await addTransaction({
+                                user_id: user.id,
+                                type: 'topup',
+                                description: `Admin mass balance reset by ${currentUser.username}`,
+                                coins_amount: 0,
+                                chips_amount: 0
+                              });
 
-                      let resetCount = 0;
-                      // Reset all non-admin users
-                      for (const user of users) {
-                        if (!user.is_admin) {
-                          try {
-                            console.log(`Resetting balance for user: ${user.username} (${user.id})`);
-                            await resetUserBalance(user.id);
-
-                            // Add transaction record
-                            await addTransaction({
-                              user_id: user.id,
-                              type: 'topup',
-                              description: `Admin mass balance reset by ${currentUser.username}`,
-                              coins_amount: 0,
-                              chips_amount: 0
-                            });
-
-                            resetCount++;
-                          } catch (userError) {
-                            console.error(`Failed to reset user ${user.username}:`, userError);
+                              resetCount++;
+                            } catch (userError) {
+                              console.error(`Failed to reset user ${user.username}:`, userError);
+                            }
                           }
                         }
+
+                        await loadUsersFromSupabase();
+
+                        toast({
+                          title: "Economy Reset",
+                          description: `${resetCount} non-admin accounts reset to 0 balance`,
+                        });
+                      } catch (error: any) {
+                        console.error('Error in mass reset:', error);
+                        toast({
+                          title: "Error",
+                          description: error.message || "Failed to reset user accounts",
+                          variant: "destructive",
+                        });
+                      } finally {
+                        setIsLoading(false);
                       }
-
-                      await loadUsersFromSupabase();
-
+                    }}
+                    className="w-full"
+                    disabled={isLoading}
+                  >
+                    💥 Reset All User Balances
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      // Clear localStorage data but keep the main user session
+                      const currentUserData = localStorage.getItem('casinoUser');
+                      localStorage.clear();
+                      if (currentUserData) {
+                        localStorage.setItem('casinoUser', currentUserData);
+                      }
+                      
                       toast({
-                        title: "Economy Reset",
-                        description: `${resetCount} non-admin accounts reset to 0 balance`,
+                        title: "Cache Cleared",
+                        description: "Local cache has been cleared (user session preserved)",
                       });
-                    } catch (error: any) {
-                      console.error('Error in mass reset:', error);
-                      toast({
-                        title: "Error",
-                        description: error.message || "Failed to reset user accounts",
-                        variant: "destructive",
-                      });
-                    } finally {
-                      setIsLoading(false);
-                    }
-                  }}
-                  className="w-full"
-                  disabled={isLoading}
-                >
-                  💥 Reset All User Balances
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    // Clear localStorage data but keep the main user session
-                    const currentUserData = localStorage.getItem('casinoUser');
-                    localStorage.clear();
-                    if (currentUserData) {
-                      localStorage.setItem('casinoUser', currentUserData);
-                    }
-
-                    toast({
-                      title: "LocalStorage Cleared",
-                      description: "Local cache cleared (user session preserved)",
-                    });
-                  }}
-                  className="w-full"
-                >
-                  🧹 Clear Local Cache
-                </Button>
+                      
+                      setTimeout(() => window.location.reload(), 1500);
+                    }}
+                    className="w-full"
+                    disabled={isLoading}
+                  >
+                    🗑️ Clear Cache & Reload
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -1140,292 +1257,5 @@ const AdminPanel = () => {
     </Card>
   );
 };
-
-const Authentication = () => {
-  const [signInUsername, setSignInUsername] = useState("");
-  const [signInPassword, setSignInPassword] = useState("");
-  const [signUpUsername, setSignUpUsername] = useState("");
-  const [signUpPassword, setSignUpPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [user, setUser] = useState<any>(null);
-  const { toast } = useToast();
-  const navigate = useNavigate();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isLoadingAfterLogin, setIsLoadingAfterLogin] = useState(false);
-
-  useEffect(() => {
-    const savedUser = localStorage.getItem('casinoUser');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      setIsLoggedIn(true);
-    }
-  }, []);
-
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    handleLogin();
-  };
-
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    handleRegister();
-  };
-
-  const handleRegister = async () => {
-    if (!signUpUsername || !signUpPassword || !confirmPassword) {
-      toast({
-        title: "Error",
-        description: "Please fill in all fields",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (signUpPassword !== confirmPassword) {
-      toast({
-        title: "Error",
-        description: "Passwords do not match",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const userData = await signUp(signUpUsername, signUpPassword);
-      localStorage.setItem("casinoUser", JSON.stringify(userData));
-      setUser(userData);
-      setIsLoggedIn(true);
-      setUsername("");
-      setPassword("");
-      setConfirmPassword("");
-
-      toast({
-        title: "Account Created! 🎉",
-        description: `Welcome to the casino, ${userData.username}! You received 10 free checkels to start.`,
-      });
-    } catch (error: any) {
-      console.error('Sign up error:', error);
-      toast({
-        title: "Signup Failed",
-        description: error.message || "Username may already exist or other error occurred",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleLogin = async () => {
-    if (!signInUsername || !signInPassword) {
-      toast({
-        title: "Missing credentials",
-        description: "Please enter both username and password",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const userData = await signIn(signInUsername, signInPassword);
-
-      if (userData.is_banned) {
-        toast({
-          title: "Account Banned",
-          description: "Your account has been banned. Please contact support.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      setUser(userData);
-      localStorage.setItem('casinoUser', JSON.stringify(userData));
-
-      // Show loading state while syncing data
-      setIsLoadingAfterLogin(true);
-
-      toast({
-        title: "Login Successful",
-        description: "Syncing your data with database...",
-      });
-
-      // Simulate data sync time to ensure database consistency
-      setTimeout(() => {
-        setIsLoadingAfterLogin(false);
-
-        toast({
-          title: "Welcome back!",
-          description: `Your data has been synchronized, ${userData.username}!`,
-        });
-
-        if (userData.is_admin) {
-          navigate('/admin');
-        } else {
-          navigate('/');
-        }
-      }, 2000);
-    } catch (error: any) {
-      console.error('Login error:', error);
-      toast({
-        title: "Login Failed",
-        description: error.message || "Invalid username or password",
-        variant: "destructive",
-      });
-    }
-  };
-
-  if (isLoading || isLoadingAfterLogin) {
-    const loadingMessage = isLoadingAfterLogin 
-      ? 'Loading your dashboard...' 
-      : isLogin 
-        ? 'Signing you in...' 
-        : 'Creating your account...';
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="flex items-center justify-center space-x-3 text-white mb-4">
-            <div className="w-8 h-8 border-3 border-white border-t-transparent animate-spin rounded-full"></div>
-            <span className="text-xl font-medium">{loadingMessage}</span>
-          </div>
-          {isLoadingAfterLogin && (
-            <div className="max-w-md mx-auto">
-              <div className="bg-white/10 backdrop-blur-lg rounded-lg p-4 border border-white/20">
-                <div className="flex items-center space-x-2 text-white/80">
-                  <div className="w-4 h-4 bg-green-400 rounded-full animate-pulse"></div>
-                  <span className="text-sm">Syncing account data</span>
-                </div>
-                <div className="flex items-center space-x-2 text-white/80 mt-2">
-                  <div className="w-4 h-4 bg-blue-400 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
-                  <span className="text-sm">Loading dashboard</span>
-                </div>
-                <div className="flex items-center space-x-2 text-white/80 mt-2">
-                  <div className="w-4 h-4 bg-purple-400 rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
-                  <span className="text-sm">Preparing your experience</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-
-  if (user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900"></div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md bg-white/10 backdrop-blur-lg border-white/20">
-        <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-bold text-white flex items-center justify-center space-x-3">
-            <CheckelsIcon className="w-8 h-8 text-yellow-400" />
-            <span className="bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
-              ₵ Checkels
-            </span>
-          </CardTitle>
-          <p className="text-white/80 mt-2">
-            Sign In or Sign Up
-          </p>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="sign-in" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="sign-in">Sign In</TabsTrigger>
-              <TabsTrigger value="sign-up">Sign Up</TabsTrigger>
-            </TabsList>
-            <TabsContent value="sign-in" className="space-y-4">
-              <form onSubmit={handleSignIn} className="space-y-4">
-                <div>
-                  <Label htmlFor="signInUsername" className="text-white/90">
-                    Username
-                  </Label>
-                  <Input
-                    id="signInUsername"
-                    type="text"
-                    value={signInUsername}
-                    onChange={(e) => setSignInUsername(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
-                    placeholder="Enter your username"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="signInPassword" className="text-white/90">
-                    Password
-                  </Label>
-                  <Input
-                    id="signInPassword"
-                    type="password"
-                    value={signInPassword}
-                    onChange={(e) => setSignInPassword(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
-                    placeholder="Enter your password"
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
-                >
-                  Sign In
-                </Button>
-              </form>
-            </TabsContent>
-            <TabsContent value="sign-up" className="space-y-4">
-              <form onSubmit={handleSignUp} className="space-y-4">
-                <div>
-                  <Label htmlFor="signUpUsername" className="text-white/90">
-                    Username
-                  </Label>
-                  <Input
-                    id="signUpUsername"
-                    type="text"
-                    value={signUpUsername}
-                    onChange={(e) => setSignUpUsername(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
-                    placeholder="Enter your username"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="signUpPassword" className="text-white/90">
-                    Password
-                  </Label>
-                  <Input
-                    id="signUpPassword"
-                    type="password"
-                    value={signUpPassword}
-                    onChange={(e) => setSignUpPassword(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
-                    placeholder="Enter your password"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="confirmPassword" className="text-white/90">
-                    Confirm Password
-                  </Label>
-                  <Input
-                    id="confirmPassword"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
-                    placeholder="Confirm your password"
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
-                >
-                  Sign Up
-                </Button>
-              </form>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
-
 
 export default Index;

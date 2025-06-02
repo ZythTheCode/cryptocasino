@@ -462,14 +462,17 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
             // Cap total time to max generation duration
             const cappedTotalTime = Math.min(totalElapsedTime, maxGenerationTime);
 
-            // Calculate offline generation with current level's CPS
-            const offlineGeneration = calculateBaseCPS(level) * timeOfflineSeconds;
-
-            // Add any saved current checkels
-            const totalCheckels = (parsedState.current_checkels || 0) + offlineGeneration;
+            // Calculate offline generation with current level's CPS, but cap it to max duration
+            const maxOfflineGeneration = calculateBaseCPS(level) * maxGenerationTime;
+            const actualOfflineGeneration = Math.min(calculateBaseCPS(level) * timeOfflineSeconds, maxOfflineGeneration);
+            
+            // Calculate total checkels including what was already generated before leaving
+            const previousCheckels = parsedState.current_checkels || 0;
+            const totalPossibleForSession = maxOfflineGeneration;
+            const totalCheckels = Math.min(previousCheckels + actualOfflineGeneration, totalPossibleForSession);
 
             setCurrentCheckels(totalCheckels);
-            setOfflineGenerated(offlineGeneration);
+            setOfflineGenerated(actualOfflineGeneration);
 
             // Set last claim time to maintain the total elapsed time continuity
             const adjustedClaimTime = returnTime - (cappedTotalTime * 1000);
@@ -480,10 +483,10 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
             setGenerationActive(shouldContinueGeneration);
 
             // Show offline generation notification
-            if (offlineGeneration > 0) {
+            if (actualOfflineGeneration > 0) {
               toast({
                 title: "Welcome back!",
-                description: `Your tree generated ${offlineGeneration.toFixed(4)} ₵ Checkels while you were away! Timer: ${formatDuration(Math.floor(cappedTotalTime))}/${formatDuration(maxGenerationTime)} ${!shouldContinueGeneration ? 'Generation complete.' : ''}`,
+                description: `Your tree generated ${actualOfflineGeneration.toFixed(4)} ₵ Checkels while you were away! Timer: ${formatDuration(Math.floor(cappedTotalTime))}/${formatDuration(maxGenerationTime)} ${!shouldContinueGeneration ? 'Generation complete.' : ''}`,
               });
             }
 
@@ -553,9 +556,9 @@ const MoneyTreeCard = ({ user, setUser, treeUpgrade, setTreeUpgrade, updateUserA
       if (timeElapsed < maxGenerationTime) {
         setCurrentCheckels((prev) => {
           const newValue = prev + finalCPS;
-          // Cap at max possible generation for this level
+          // Cap at max possible generation for this level (total for the entire session)
           const maxPossibleForSession = calculateBaseCPS(level) * maxGenerationTime;
-          return Math.min(newValue, maxPossibleForSession + offlineGenerated);
+          return Math.min(newValue, maxPossibleForSession);
         });
       } else {
         // Stop generation when max time is reached

@@ -40,7 +40,8 @@ import {
   getPendingTopupRequests,
   updateTopupRequestStatus,
   addTransaction,
-  signIn
+  signIn,
+  updateUserBalance
 } from '@/lib/database';
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import {
@@ -280,10 +281,26 @@ const AdminDashboard = () => {
         return;
       }
 
+      const newChipsAmount = (targetUser.chips || 0) + topUp.amount;
+
       // Update user balance in Supabase
-      await updateUserBalance(targetUser.id, {
-        chips: (targetUser.chips || 0) + topUp.amount
+      const updatedUser = await updateUserBalance(targetUser.id, {
+        chips: newChipsAmount
       });
+
+      // Immediately update local state for instant feedback
+      setAllUsers(prev => prev.map(u => 
+        u.id === targetUser.id 
+          ? { ...u, chips: newChipsAmount }
+          : u
+      ));
+
+      // Also update current user's balance if they're the one being approved
+      if (user?.id === targetUser.id) {
+        const updatedCurrentUser = { ...user, chips: newChipsAmount };
+        setUser(updatedCurrentUser);
+        localStorage.setItem('casinoUser', JSON.stringify(updatedCurrentUser));
+      }
 
       // Add transaction to Supabase
       await addTransaction({
@@ -301,8 +318,6 @@ const AdminDashboard = () => {
         title: "Top-up Approved",
         description: `${topUp.amount} chips added to ${targetUser.username}`,
       });
-
-      // Real-time subscriptions will automatically update the UI
 
     } catch (error) {
       console.error('Error approving top-up:', error);
@@ -431,12 +446,25 @@ const AdminDashboard = () => {
 
   const handleResetBalance = async (userId: string, username: string) => {
     try {
-      await resetUserBalance(userId);
+      const resetUser = await resetUserBalance(userId);
 
-      // Immediately update the local state
+      // Immediately update the local state for instant feedback
       setAllUsers(prev => prev.map(u => 
-        u.id === userId ? { ...u, coins: 0, chips: 0 } : u
+        u.id === userId 
+          ? { 
+              ...u, 
+              coins: 0, 
+              chips: 0 
+            }
+          : u
       ));
+
+      // Also update current user's balance if they're the one being reset
+      if (user?.id === userId) {
+        const updatedCurrentUser = { ...user, coins: 0, chips: 0 };
+        setUser(updatedCurrentUser);
+        localStorage.setItem('casinoUser', JSON.stringify(updatedCurrentUser));
+      }
 
       // Add transaction record
       await addTransaction({
@@ -480,19 +508,38 @@ const AdminDashboard = () => {
     }
 
     try {
-      // Update user balance
-      await addUserBalance(userId, coinsToAdd, chipsToAdd);
+      // Find current user to get current balance
+      const currentUser = allUsers.find(u => u.id === userId);
+      if (!currentUser) {
+        throw new Error("User not found");
+      }
+
+      const newCoins = (currentUser.coins || 0) + coinsToAdd;
+      const newChips = (currentUser.chips || 0) + chipsToAdd;
+
+      // Update user balance using updateUserBalance for real-time sync
+      const updatedUser = await updateUserBalance(userId, {
+        coins: newCoins,
+        chips: newChips
+      });
 
       // Immediately update the local state for instant feedback
       setAllUsers(prev => prev.map(u => 
         u.id === userId 
           ? { 
               ...u, 
-              coins: (u.coins || 0) + coinsToAdd, 
-              chips: (u.chips || 0) + chipsToAdd 
+              coins: newCoins, 
+              chips: newChips 
             }
           : u
       ));
+
+      // Also update current user's balance if they're the one being modified
+      if (user?.id === userId) {
+        const updatedCurrentUser = { ...user, coins: newCoins, chips: newChips };
+        setUser(updatedCurrentUser);
+        localStorage.setItem('casinoUser', JSON.stringify(updatedCurrentUser));
+      }
 
       // Add transaction record for tracking
       if (coinsToAdd > 0) {
@@ -891,6 +938,7 @@ const AdminDashboard = () => {
                 {/* Game Activity Breakdown */}
                 <div className="mb-6">
                   <h3 className="font-semibold text-lg mb-3">Casino Games Activity</h3>
+```python
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {['Minebomb', 'Color Game', 'Blackjack', 'Slot Machine', 'Baccarat'].map(game => {
                       const gameBets = allTransactions.filter(tx => tx.game === game && tx.type === 'bet');
