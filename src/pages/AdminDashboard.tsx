@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -83,7 +82,7 @@ const AdminDashboard = () => {
   const [processingUsers, setProcessingUsers] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
-  
+
   // Balance management states
   const [balanceDialog, setBalanceDialog] = useState({ 
     open: false, 
@@ -94,11 +93,11 @@ const AdminDashboard = () => {
   });
   const [coinsAmount, setCoinsAmount] = useState('');
   const [chipsAmount, setChipsAmount] = useState('');
-  
+
   // Bulk operations
   const [bulkDialog, setBulkDialog] = useState({ open: false, type: '' });
   const [bulkAmount, setBulkAmount] = useState('');
-  
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -411,12 +410,12 @@ const AdminDashboard = () => {
 
     try {
       const regularUsers = allUsers.filter(u => !u.is_admin);
-      
+
       for (const userData of regularUsers) {
         if (bulkDialog.type === 'checkels') {
           const newCoins = (userData.coins || 0) + amount;
           await updateUserBalance(userData.id, { coins: newCoins });
-          
+
           await addTransaction({
             user_id: userData.id,
             type: 'topup',
@@ -427,7 +426,7 @@ const AdminDashboard = () => {
         } else if (bulkDialog.type === 'chips') {
           const newChips = (userData.chips || 0) + amount;
           await updateUserBalance(userData.id, { chips: newChips });
-          
+
           await addTransaction({
             user_id: userData.id,
             type: 'topup',
@@ -719,7 +718,7 @@ const AdminDashboard = () => {
             <Badge className="bg-purple-500/20 text-purple-100 border-purple-400/30">
               Admin: {user?.username}
             </Badge>
-            <Button 
+            <Button
               onClick={() => {
                 loadData();
                 toast({
@@ -729,6 +728,7 @@ const AdminDashboard = () => {
               }} 
               variant="outline" 
               size="sm" 
+              disabled={isLoading}
               className="bg-green-500/20 border-green-400/30 text-green-100 hover:bg-green-500/30"
             >
               <Activity className="w-4 h-4 mr-2" />
@@ -1049,7 +1049,7 @@ const AdminDashboard = () => {
                                 </Badge>
                               )}
                             </div>
-                            
+
                             <div className="grid grid-cols-2 gap-4 text-sm text-white/70">
                               <div className="flex items-center space-x-2">
                                 <CheckelsIcon className="w-4 h-4 text-yellow-400" />
@@ -1342,4 +1342,3 @@ const AdminDashboard = () => {
 };
 
 export default AdminDashboard;
-  

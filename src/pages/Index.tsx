@@ -838,14 +838,6 @@ const AdminPanel = () => {
               <Settings className="w-6 h-6" />
               <span>🎰 Casino Admin Panel</span>
             </span>
-            <div className="flex space-x-2">
-              <Button size="sm" variant="outline" onClick={() => setActiveTab("users")}>
-                User Management
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setActiveTab("testing")}>
-                Testing Tools
-              </Button>
-            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
