@@ -6,10 +6,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Coins, 
-  DollarSign, 
-  ArrowLeftRight, 
+import {
+  Coins,
+  DollarSign,
+  ArrowLeftRight,
   CreditCard,
   Banknote,
   Plus,
@@ -22,12 +22,19 @@ import {
   Upload,
   Wallet,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { signIn, updateUserBalance, addTransaction, getUserTransactions, createTopupRequest, createWithdrawalRequest } from '@/lib/database';
+import {
+  signIn,
+  updateUserBalance,
+  addTransaction,
+  getUserTransactions,
+  createTopupRequest,
+  createWithdrawalRequest,
+} from "@/lib/database";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
-import { supabase } from '@/lib/supabase';
+import { supabase } from "@/lib/supabase";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import MobileNavigation from "@/components/MobileNavigation";
 import {
@@ -45,133 +52,44 @@ import {
 const WalletPage = () => {
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [pageLoading, setPageLoading] = useState(true);
-  const [convertAmount, setConvertAmount] = useState(0);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [transactions, setTransactions] = useState([]);
 
   useEffect(() => {
     const loadUserData = async () => {
+      setIsLoading(true);
       const savedUser = localStorage.getItem("casinoUser");
-      if (!savedUser) {
-        setUser(null);
-        setIsLoading(false);
-        return;
-      }
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        setUser(parsedUser);
 
-      const parsedUser = JSON.parse(savedUser);
+        try {
+          const freshUser = await signIn(
+            parsedUser.username,
+            parsedUser.password_hash || "migrated_user"
+          );
+          localStorage.setItem("casinoUser", JSON.stringify(freshUser));
+          setUser(freshUser);
 
-      try {
-        // Show loading message first
-        toast({
-          title: "Loading Wallet",
-          description: "Syncing with database...",
-        });
-
-        const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
-
-        if (freshUser.is_banned) {
-          toast({
-            title: "Account Banned",
-            description: "Your account has been banned. Redirecting to login.",
-            variant: "destructive",
-          });
-          localStorage.removeItem('casinoUser');
-          setTimeout(() => navigate('/'), 2000);
-          return;
+          // Load transactions
+          const userTransactions = await getUserTransactions(freshUser.id);
+          setTransactions(userTransactions || []);
+        } catch (error) {
+          console.log("Using localStorage data, Supabase sync failed");
         }
-
-        localStorage.setItem('casinoUser', JSON.stringify(freshUser));
-        setUser(freshUser);
-
-        // Wait a bit for data to sync
-        setTimeout(() => {
-          toast({
-            title: "Wallet Ready! 💰",
-            description: `Welcome to your wallet, ${freshUser.username}!`,
-          });
-        }, 1000);
-      } catch (error) {
-        console.log('Failed to load user from Supabase:', error);
-        toast({
-          title: "Connection Error",
-          description: "Failed to sync with database. Using offline mode.",
-          variant: "destructive",
-        });
-        // Don't remove user, allow offline mode
-        const userWithDefaults = {
-          ...parsedUser,
-          coins: parsedUser.coins || 0,
-          chips: parsedUser.chips || 0,
-          isAdmin: parsedUser.isAdmin || parsedUser.is_admin || false
-        };
-        setUser(userWithDefaults);
-        localStorage.setItem('casinoUser', JSON.stringify(userWithDefaults));
-      } finally {
-        setIsLoading(false);
-        // Add extra time for data synchronization
-        setTimeout(() => setPageLoading(false), 1500);
+      } else {
+        navigate("/");
       }
+      setIsLoading(false);
     };
 
     loadUserData();
-  }, [navigate, toast]);
+  }, [navigate]);
 
-  const loadTransactions = async (userId: string) => {
-    try {
-      const supabaseTransactions = await getUserTransactions(userId, 50);
-
-      const walletTransactions = supabaseTransactions.filter((tx: any) => 
-        tx.type === 'conversion' || tx.type === 'chip_conversion' || tx.type === 'topup' || tx.type === 'withdrawal'
-      );
-
-      setTransactions(walletTransactions);
-    } catch (error) {
-      console.error('Error loading wallet transactions from Supabase:', error);
-      setTransactions([]);
-    }
-  };
-
-  useEffect(() => {
-    if (user?.id && supabase) {
-      const subscription = supabase
-        .channel(`wallet_transactions_${user.id}_${Date.now()}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'transactions',
-          filter: `user_id=eq.${user.id}`
-        }, (payload) => {
-          console.log('Wallet transaction change detected:', payload);
-          if (['conversion', 'chip_conversion', 'topup', 'withdrawal'].includes(payload.new?.type || payload.old?.type)) {
-            loadTransactions(user.id);
-          }
-        })
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'users',
-          filter: `id=eq.${user.id}`
-        }, (payload) => {
-          console.log('User balance change detected:', payload);
-          if (payload.new) {
-            const updatedUser = { ...user, ...payload.new };
-            localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
-            setUser(updatedUser);
-          }
-        })
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(subscription);
-      };
-    }
-  }, [user?.id]);
-
-  if (isLoading || pageLoading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
         <div className="flex items-center space-x-2 text-white">
           <div className="w-6 h-6 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
           <span>Loading wallet...</span>
@@ -183,55 +101,67 @@ const WalletPage = () => {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 text-white">
-      <header className="bg-gradient-to-r from-blue-800/90 to-purple-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+      <header className="bg-gradient-to-r from-indigo-800/90 to-purple-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-white">
-            <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent flex items-center space-x-3">
-              <Wallet className="w-8 h-8 text-blue-400" />
+          <h1 className="text-3xl font-bold text-white flex items-center space-x-3">
+            <Wallet className="w-8 h-8 text-purple-400" />
+            <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
               Digital Wallet
             </span>
           </h1>
           <div className="flex items-center space-x-6">
-            <div className="hidden md:flex items-center space-x-4 bg-black/20 rounded-full px-6 py-3 border border-white/10">
+            <div className="flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
               <div className="flex items-center space-x-2">
-                <CheckelsIcon className="w-6 h-6 text-yellow-400" />
-                <span className="text-yellow-100 font-bold text-lg">
-                  {(user?.coins || 0).toFixed(2)} ₵
+                <CheckelsIcon className="w-5 h-5 text-yellow-400" />
+                <span className="text-yellow-100 font-semibold">
+                  {(user?.coins || 0).toFixed(2)} ₵ Checkels
                 </span>
               </div>
-              <div className="w-px h-8 bg-white/20"></div>
+              <div className="w-px h-6 bg-white/20"></div>
               <div className="flex items-center space-x-2">
-                <ChipsIcon className="w-6 h-6 text-green-400" />
-                <span className="text-green-100 font-bold text-lg">
-                  {(user?.chips || 0).toFixed(2)}
+                <ChipsIcon className="w-5 h-5 text-green-400" />
+                <span className="text-green-100 font-semibold">
+                  {(user?.chips || 0).toFixed(2)} Chips
                 </span>
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <span className="hidden md:block text-white/90 font-medium">Welcome, {user?.username}</span>
-              <div className="hidden md:flex space-x-2">
+              <span className="text-white/90 font-medium">
+                Welcome, {user?.username}
+              </span>
+              <div className="flex space-x-2">
                 <Link to="/">
-                  <Button variant="outline" size="sm" className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30"
+                  >
                     <Home className="w-4 h-4" />
                     <span>Home</span>
                   </Button>
                 </Link>
                 <Link to="/casino">
-                  <Button variant="outline" size="sm" className="flex items-center space-x-2 bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30"
+                  >
                     <Gamepad2 className="w-4 h-4" />
                     <span>Casino</span>
                   </Button>
                 </Link>
                 <Link to="/tree">
-                  <Button variant="outline" size="sm" className="flex items-center space-x-2 bg-green-500/20 border-green-400/30 text-green-100 hover:bg-green-500/30">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-green-500/20 border-green-400/30 text-green-100 hover:bg-green-500/30"
+                  >
                     <TreePine className="w-4 h-4" />
-                    <span>Tree</span>
+                    <span>Money Tree</span>
                   </Button>
                 </Link>
               </div>
-
-              <MobileNavigation user={user} currentPage="/wallet" />
             </div>
           </div>
         </div>
@@ -241,7 +171,7 @@ const WalletPage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Balance Overview */}
           <div className="lg:col-span-3">
-            <Card className="bg-gradient-to-r from-blue-900/40 to-purple-900/40 border-white/20 backdrop-blur-sm">
+            <Card className="bg-gradient-to-r from-blue-950/80 to-purple-950/80 border-white/20 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="text-2xl text-white flex items-center space-x-3">
                   <TrendingUp className="w-8 h-8 text-green-400" />
@@ -253,20 +183,27 @@ const WalletPage = () => {
                   <div className="bg-gradient-to-br from-yellow-500/20 to-orange-500/20 p-6 rounded-xl border border-yellow-400/30">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-yellow-100 text-sm font-medium">₵ Checkels</p>
-                        <p className="text-3xl font-bold text-yellow-300">{(user?.coins || 0).toFixed(2)}</p>
-                        <p className="text-yellow-200 text-sm">Earned from Money Tree</p>
+                        <p className="text-yellow-100 text-sm font-medium">
+                          ₵ Checkels
+                        </p>
+                        <div className="text-3xl font-bold text-yellow-300">{(user?.coins || 0).toFixed(2)}</div>
+                        <p className="text-yellow-200 text-sm">
+                          Earned from Money Tree
+                        </p>
                       </div>
                       <CheckelsIcon className="w-16 h-16 text-yellow-400" />
                     </div>
                   </div>
-
-                  <div className="bg-gradient-to-br from-green-500/20 to-emerald-500/20 p-6 rounded-xl border border-green-400/30">
+                  <div className="bg-gradient-to-br from-green-500/20 to-blue-500/20 p-6 rounded-xl border border-green-400/30">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-green-100 text-sm font-medium">Casino Chips</p>
-                        <p className="text-3xl font-bold text-green-300">{(user?.chips || 0).toFixed(2)}</p>
-                        <p className="text-green-200 text-sm">≈ ₱{((user?.chips || 0) * 10).toFixed(2)} PHP</p>
+                        <p className="text-green-100 text-sm font-medium">
+                          Casino Chips
+                        </p>
+                        <div className="text-3xl font-bold text-green-300">{(user?.chips || 0).toFixed(2)}</div>
+                        <p className="text-green-200 text-sm">
+                          For casino games
+                        </p>
                       </div>
                       <ChipsIcon className="w-16 h-16 text-green-400" />
                     </div>
@@ -280,15 +217,24 @@ const WalletPage = () => {
           <div className="lg:col-span-2">
             <Tabs defaultValue="convert" className="w-full">
               <TabsList className="grid w-full grid-cols-3 bg-black/20">
-                <TabsTrigger value="convert" className="data-[state=active]:bg-blue-600">
+                <TabsTrigger
+                  value="convert"
+                  className="data-[state=active]:bg-blue-600"
+                >
                   <ArrowLeftRight className="w-4 h-4 mr-2" />
                   Convert
                 </TabsTrigger>
-                <TabsTrigger value="topup" className="data-[state=active]:bg-green-600">
+                <TabsTrigger
+                  value="topup"
+                  className="data-[state=active]:bg-green-600"
+                >
                   <Plus className="w-4 h-4 mr-2" />
                   Top Up
                 </TabsTrigger>
-                <TabsTrigger value="withdraw" className="data-[state=active]:bg-red-600">
+                <TabsTrigger
+                  value="withdraw"
+                  className="data-[state=active]:bg-red-600"
+                >
                   <Minus className="w-4 h-4 mr-2" />
                   Withdraw
                 </TabsTrigger>
@@ -310,10 +256,12 @@ const WalletPage = () => {
 
           {/* Transaction History */}
           <div className="lg:col-span-1">
-            <WalletTransactionHistory transactions={transactions} />
+            <TransactionHistorySection transactions={transactions} />
           </div>
         </div>
       </div>
+
+      <MobileNavigation />
     </div>
   );
 };
@@ -321,65 +269,118 @@ const WalletPage = () => {
 const ConvertSection = ({ user, setUser }: any) => {
   const [coinsToConvert, setCoinsToConvert] = useState<number>(0);
   const [chipsToConvert, setChipsToConvert] = useState<number>(0);
+  const [isConverting, setIsConverting] = useState(false);
   const { toast } = useToast();
 
-  const handleConversion = async (fromCurrency: string, toCurrency: string) => {
-    const amount = fromCurrency === 'coins' ? coinsToConvert : chipsToConvert;
-
-    if (amount <= 0) {
+  const handleConvertToChips = async () => {
+    if (!coinsToConvert || coinsToConvert <= 0) {
       toast({
         title: "Invalid Amount",
-        description: "Please enter a valid amount greater than 0",
+        description: "Please enter a valid amount",
         variant: "destructive",
       });
       return;
     }
 
-    const fromBalance = fromCurrency === 'coins' ? user.coins : user.chips;
-    if (amount > fromBalance) {
+    if (coinsToConvert > (user.coins || 0)) {
       toast({
-        title: "Insufficient Balance",
-        description: `You don't have enough ${fromCurrency}`,
+        title: "Insufficient Checkels",
+        description: "You don't have enough checkels",
         variant: "destructive",
       });
       return;
     }
+
+    setIsConverting(true);
 
     try {
-      const convertedAmount = Math.floor(amount * 10);
-      const updates = {
-        [fromCurrency]: fromBalance - amount,
-        [toCurrency]: toCurrency === 'coins' 
-          ? (user[toCurrency] || 0) + Math.floor(amount / 10)
-          : (user[toCurrency] || 0) + convertedAmount
-      };
-
-      const updatedUser = await updateUserBalance(user.id, updates);
+      const chipsToAdd = coinsToConvert * 10;
+      const updatedUser = await updateUserBalance(user.id, {
+        coins: Math.round((user.coins - coinsToConvert) * 100) / 100,
+        chips: Math.round((user.chips + chipsToAdd) * 100) / 100,
+      });
 
       await addTransaction({
         user_id: user.id,
-        type: 'conversion',
-        coins_amount: fromCurrency === 'coins' ? -amount : Math.floor(amount / 10),
-        chips_amount: fromCurrency === 'chips' ? -amount : convertedAmount,
-        description: `Converted ${amount} ${fromCurrency} to ${toCurrency === 'coins' ? Math.floor(amount / 10) : convertedAmount} ${toCurrency}`
+        type: "conversion",
+        amount: chipsToAdd,
+        description: `Converted ${coinsToConvert} checkels to ${chipsToAdd} chips`,
       });
 
-      localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
       setUser(updatedUser);
-      setCoinsToConvert(0);
-      setChipsToConvert(0);
+      localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
 
       toast({
-        title: "Conversion Successful! ✨",
-        description: `Converted ${amount} ${fromCurrency} to ${toCurrency === 'coins' ? Math.floor(amount / 10) : convertedAmount} ${toCurrency}`,
+        title: "Conversion Successful! 🎉",
+        description: `Converted ${coinsToConvert} checkels to ${chipsToAdd} chips`,
       });
+
+      setCoinsToConvert(0);
     } catch (error) {
-      console.error('Conversion error:', error);
+      console.error("Conversion error:", error);
       toast({
         title: "Conversion Failed",
-        description: "Failed to process conversion. Please try again.",
+        description: "Failed to convert currency. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
+  const handleConvertToCoins = async () => {
+    if (!chipsToConvert || chipsToConvert <= 0) {
+      toast({
+        title: "Invalid Amount",
+        description: "Please enter a valid amount",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (chipsToConvert > user.chips) {
+      toast({
+        title: "Insufficient Chips",
+        description: "You don't have enough chips",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsConverting(true);
+
+    try {
+      const coinsToAdd = chipsToConvert / 10;
+      const updatedUser = await updateUserBalance(user.id, {
+        coins: Math.round((user.coins + coinsToAdd) * 100) / 100,
+        chips: Math.round((user.chips - chipsToConvert) * 100) / 100,
+      });
+
+      await addTransaction({
+        user_id: user.id,
+        type: "conversion",
+        amount: -chipsToConvert,
+        description: `Converted ${chipsToConvert} chips to ${coinsToAdd} checkels`,
+      });
+
+      setUser(updatedUser);
+      localStorage.setItem("casinoUser", JSON.stringify(updatedUser));
+
+      toast({
+        title: "Conversion Successful! 🎉",
+        description: `Converted ${chipsToConvert} chips to ${coinsToAdd} checkels`,
+      });
+
+      setChipsToConvert(0);
+    } catch (error) {
+      console.error("Conversion error:", error);
+      toast({
+        title: "Conversion Failed",
+        description: "Failed to convert currency. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsConverting(false);
     }
   };
 
@@ -395,19 +396,26 @@ const ConvertSection = ({ user, setUser }: any) => {
         {/* Checkels to Chips */}
         <div className="space-y-4">
           <div className="bg-gradient-to-r from-yellow-500/10 to-green-500/10 p-4 rounded-lg border border-yellow-400/20">
-            <Label className="text-yellow-300 font-medium">Convert ₵ Checkels to Chips</Label>
-            <p className="text-sm text-yellow-200 mb-3">Rate: 1 ₵ Checkel = 10 Chips</p>
+            <Label className="text-yellow-300 font-medium">
+              Convert ₵ Checkels to Chips
+            </Label>
+            <p className="text-sm text-yellow-200 mb-3">
+              Rate: 1 ₵ Checkel = 10 Chips
+            </p>
             <div className="flex space-x-3">
               <Input
                 type="number"
                 placeholder="Enter checkels"
-                value={coinsToConvert || ''}
+                value={coinsToConvert || ""}
                 onChange={(e) => setCoinsToConvert(Number(e.target.value))}
                 className="bg-black/40 border-yellow-400/30 text-white"
               />
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button className="bg-gradient-to-r from-yellow-500 to-green-500 hover:from-yellow-600 hover:to-green-600 text-black font-bold min-w-[120px]">
+                  <Button
+                    className="bg-gradient-to-r from-yellow-500 to-green-500 hover:from-yellow-600 hover:to-green-600 text-black font-bold min-w-[120px]"
+                    disabled={!coinsToConvert || coinsToConvert > (user.coins || 0)}
+                  >
                     Convert →
                   </Button>
                 </AlertDialogTrigger>
@@ -415,14 +423,17 @@ const ConvertSection = ({ user, setUser }: any) => {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Confirm Conversion</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Convert {coinsToConvert} ₵ Checkels to {(coinsToConvert * 10).toFixed(0)} Chips?
-                      <br />This action cannot be undone.
+                      Are you sure you want to convert {coinsToConvert} checkels
+                      to {(coinsToConvert * 10).toFixed(2)} chips?
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => handleConversion('coins', 'chips')}>
-                      Confirm Conversion
+                    <AlertDialogAction
+                      onClick={handleConvertToChips}
+                      disabled={isConverting}
+                    >
+                      {isConverting ? "Converting..." : "Convert"}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -430,7 +441,7 @@ const ConvertSection = ({ user, setUser }: any) => {
             </div>
             {coinsToConvert > 0 && (
               <p className="text-sm text-green-300 mt-2">
-                You will receive: {(coinsToConvert * 10).toFixed(0)} chips
+                You will get: {(coinsToConvert * 10).toFixed(2)} chips
               </p>
             )}
           </div>
@@ -439,19 +450,26 @@ const ConvertSection = ({ user, setUser }: any) => {
         {/* Chips to Checkels */}
         <div className="space-y-4">
           <div className="bg-gradient-to-r from-green-500/10 to-yellow-500/10 p-4 rounded-lg border border-green-400/20">
-            <Label className="text-green-300 font-medium">Convert Chips to ₵ Checkels</Label>
-            <p className="text-sm text-green-200 mb-3">Rate: 10 Chips = 1 ₵ Checkel</p>
+            <Label className="text-green-300 font-medium">
+              Convert Chips to ₵ Checkels
+            </Label>
+            <p className="text-sm text-green-200 mb-3">
+              Rate: 10 Chips = 1 ₵ Checkel
+            </p>
             <div className="flex space-x-3">
               <Input
                 type="number"
                 placeholder="Enter chips"
-                value={chipsToConvert || ''}
+                value={chipsToConvert || ""}
                 onChange={(e) => setChipsToConvert(Number(e.target.value))}
                 className="bg-black/40 border-green-400/30 text-white"
               />
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button className="bg-gradient-to-r from-green-500 to-yellow-500 hover:from-green-600 hover:to-yellow-600 text-black font-bold min-w-[120px]">
+                  <Button
+                    className="bg-gradient-to-r from-green-500 to-yellow-500 hover:from-green-600 hover:to-yellow-600 text-black font-bold min-w-[120px]"
+                    disabled={!chipsToConvert || chipsToConvert > user.chips}
+                  >
                     Convert →
                   </Button>
                 </AlertDialogTrigger>
@@ -459,14 +477,17 @@ const ConvertSection = ({ user, setUser }: any) => {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Confirm Conversion</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Convert {chipsToConvert} Chips to {(chipsToConvert / 10).toFixed(2)} ₵ Checkels?
-                      <br />This action cannot be undone.
+                      Are you sure you want to convert {chipsToConvert} chips to{" "}
+                      {(chipsToConvert / 10).toFixed(2)} checkels?
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => handleConversion('chips', 'coins')}>
-                      Confirm Conversion
+                    <AlertDialogAction
+                      onClick={handleConvertToCoins}
+                      disabled={isConverting}
+                    >
+                      {isConverting ? "Converting..." : "Convert"}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -474,7 +495,7 @@ const ConvertSection = ({ user, setUser }: any) => {
             </div>
             {chipsToConvert > 0 && (
               <p className="text-sm text-yellow-300 mt-2">
-                You will receive: {(chipsToConvert / 10).toFixed(2)} ₵ checkels
+                You will get: {(chipsToConvert / 10).toFixed(2)} checkels
               </p>
             )}
           </div>
@@ -495,10 +516,10 @@ const ConvertSection = ({ user, setUser }: any) => {
 
 const TopUpSection = ({ user }: any) => {
   const [amount, setAmount] = useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = useState('gcash');
-  const [referenceNumber, setReferenceNumber] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState("gcash");
+  const [referenceNumber, setReferenceNumber] = useState("");
   const [receipt, setReceipt] = useState<File | null>(null);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -540,28 +561,35 @@ const TopUpSection = ({ user }: any) => {
         });
       }
 
-      await createTopupRequest({
+      // Create a simplified topup request without problematic fields
+      const topupData = {
         user_id: user.id,
-        username: user.username,
         amount: amount,
         payment_method: paymentMethod,
         reference_number: referenceNumber,
         receipt_data: receiptData,
         notes: notes.trim() || null,
-        status: 'pending'
-      });
+        status: "pending",
+      };
 
-      toast({
-        title: "Top-up Request Submitted! 📝",
-        description: "Your request is pending admin approval. You'll be notified once processed.",
-      });
+      const success = await createTopupRequest(topupData);
 
-      setAmount(0);
-      setReferenceNumber('');
-      setReceipt(null);
-      setNotes('');
+      if (success) {
+        toast({
+          title: "Top-up Request Submitted! 📝",
+          description:
+            "Your request is pending admin approval. You'll be notified once processed.",
+        });
+
+        setAmount(0);
+        setReferenceNumber("");
+        setReceipt(null);
+        setNotes("");
+      } else {
+        throw new Error("Failed to create topup request");
+      }
     } catch (error) {
-      console.error('Top-up submission error:', error);
+      console.error("Top-up submission error:", error);
       toast({
         title: "Submission Failed",
         description: "Failed to submit top-up request. Please try again.",
@@ -582,7 +610,9 @@ const TopUpSection = ({ user }: any) => {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="bg-green-500/10 p-4 rounded-lg border border-green-400/20">
-          <h4 className="text-green-300 font-medium mb-2">💰 Top-up Information</h4>
+          <h4 className="text-green-300 font-medium mb-2">
+            💰 Top-up Information
+          </h4>
           <p className="text-sm text-green-200">Rate: ₱10 PHP = 1 Chip</p>
           <p className="text-sm text-green-200">Minimum: 10 chips (₱100)</p>
         </div>
@@ -592,7 +622,7 @@ const TopUpSection = ({ user }: any) => {
           <Input
             type="number"
             placeholder="Enter chips amount"
-            value={amount || ''}
+            value={amount || ""}
             onChange={(e) => setAmount(Number(e.target.value))}
             className="bg-black/40 border-white/20 text-white"
           />
@@ -605,13 +635,14 @@ const TopUpSection = ({ user }: any) => {
 
         <div>
           <Label className="text-white">Payment Method</Label>
-          <select 
-            value={paymentMethod} 
+          <select
+            value={paymentMethod}
             onChange={(e) => setPaymentMethod(e.target.value)}
             className="w-full p-2 bg-black/40 border border-white/20 rounded-md text-white"
           >
             <option value="gcash">GCash</option>
             <option value="paymaya">PayMaya</option>
+            <option value="credit_card">Credit Card</option>
             <option value="bank_transfer">Bank Transfer</option>
           </select>
         </div>
@@ -619,7 +650,7 @@ const TopUpSection = ({ user }: any) => {
         <div>
           <Label className="text-white">Reference Number *</Label>
           <Input
-            placeholder="Transaction reference number"
+            placeholder="Enter transaction reference"
             value={referenceNumber}
             onChange={(e) => setReferenceNumber(e.target.value)}
             className="bg-black/40 border-white/20 text-white"
@@ -627,7 +658,7 @@ const TopUpSection = ({ user }: any) => {
         </div>
 
         <div>
-          <Label className="text-white">Receipt/Screenshot</Label>
+          <Label className="text-white">Upload Receipt</Label>
           <Input
             type="file"
             accept="image/*"
@@ -637,16 +668,16 @@ const TopUpSection = ({ user }: any) => {
         </div>
 
         <div>
-          <Label className="text-white">Additional Notes</Label>
+          <Label className="text-white">Notes (Optional)</Label>
           <Textarea
-            placeholder="Any additional information..."
+            placeholder="Additional notes"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             className="bg-black/40 border-white/20 text-white"
           />
         </div>
 
-        <Button 
+        <Button
           onClick={handleSubmit}
           disabled={isSubmitting || !amount || !referenceNumber}
           className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
@@ -670,8 +701,8 @@ const TopUpSection = ({ user }: any) => {
 
 const WithdrawSection = ({ user }: any) => {
   const [amount, setAmount] = useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = useState('gcash');
-  const [accountDetails, setAccountDetails] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState("gcash");
+  const [accountDetails, setAccountDetails] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -706,24 +737,32 @@ const WithdrawSection = ({ user }: any) => {
     setIsSubmitting(true);
 
     try {
-      await createWithdrawalRequest({
+      // Create a simplified withdrawal request
+      const withdrawalData = {
         user_id: user.id,
-        username: user.username,
         amount: amount,
-        payment_method: paymentMethod,
+        withdrawal_method: paymentMethod,
         account_details: accountDetails,
-        status: 'pending'
-      });
+        php_amount: amount * 10, // Add php_amount field
+        status: "pending",
+      };
 
-      toast({
-        title: "Withdrawal Request Submitted! 💸",
-        description: "Your request is pending admin approval. Processing may take 1-3 business days.",
-      });
+      const success = await createWithdrawalRequest(withdrawalData);
 
-      setAmount(0);
-      setAccountDetails('');
+      if (success) {
+        toast({
+          title: "Withdrawal Request Submitted! 💸",
+          description:
+            "Your request is pending admin approval. Processing may take 1-3 business days.",
+        });
+
+        setAmount(0);
+        setAccountDetails("");
+      } else {
+        throw new Error("Failed to create withdrawal request");
+      }
     } catch (error) {
-      console.error('Withdrawal submission error:', error);
+      console.error("Withdrawal submission error:", error);
       toast({
         title: "Submission Failed",
         description: "Failed to submit withdrawal request. Please try again.",
@@ -744,10 +783,14 @@ const WithdrawSection = ({ user }: any) => {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="bg-red-500/10 p-4 rounded-lg border border-red-400/20">
-          <h4 className="text-red-300 font-medium mb-2">💸 Withdrawal Information</h4>
+          <h4 className="text-red-300 font-medium mb-2">
+            💸 Withdrawal Information
+          </h4>
           <p className="text-sm text-red-200">Rate: 1 Chip = ₱10 PHP</p>
           <p className="text-sm text-red-200">Minimum: 10 chips (₱100)</p>
-          <p className="text-sm text-red-200">Processing: 1-3 business days</p>
+          <p className="text-sm text-red-200">
+            Processing: 1-3 business days
+          </p>
         </div>
 
         <div>
@@ -755,12 +798,12 @@ const WithdrawSection = ({ user }: any) => {
           <Input
             type="number"
             placeholder="Enter chips to withdraw"
-            value={amount || ''}
+            value={amount || ""}
             onChange={(e) => setAmount(Number(e.target.value))}
             className="bg-black/40 border-white/20 text-white"
           />
           <p className="text-sm text-gray-400 mt-1">
-            Available: {user.chips?.toFixed(2) || '0.00'} chips
+            Available: {user.chips?.toFixed(2) || "0.00"} chips
           </p>
           {amount > 0 && (
             <p className="text-sm text-green-300 mt-1">
@@ -771,8 +814,8 @@ const WithdrawSection = ({ user }: any) => {
 
         <div>
           <Label className="text-white">Payment Method</Label>
-          <select 
-            value={paymentMethod} 
+          <select
+            value={paymentMethod}
             onChange={(e) => setPaymentMethod(e.target.value)}
             className="w-full p-2 bg-black/40 border border-white/20 rounded-md text-white"
           >
@@ -792,9 +835,11 @@ const WithdrawSection = ({ user }: any) => {
           />
         </div>
 
-        <Button 
+        <Button
           onClick={handleSubmit}
-          disabled={isSubmitting || !amount || !accountDetails || amount > user.chips}
+          disabled={
+            isSubmitting || !amount || !accountDetails || amount > user.chips
+          }
           className="w-full bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600"
         >
           {isSubmitting ? (
@@ -814,7 +859,15 @@ const WithdrawSection = ({ user }: any) => {
   );
 };
 
-const WalletTransactionHistory = ({ transactions }: any) => {
+const TransactionHistorySection = ({ transactions }: any) => {
+  const validTransactions = transactions.filter(
+    (transaction: any) =>
+      transaction.id &&
+      transaction.created_at &&
+      transaction.description &&
+      transaction.type
+  );
+
   return (
     <Card className="bg-black/20 border-white/10">
       <CardHeader>
@@ -825,77 +878,58 @@ const WalletTransactionHistory = ({ transactions }: any) => {
       </CardHeader>
       <CardContent>
         <div className="space-y-3 max-h-96 overflow-y-auto">
-          {transactions.slice(0, 20).map((transaction: any, index: number) => (
-            <div
-              key={index}
-              className="p-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors"
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <p className="font-medium text-white text-sm">{transaction.description}</p>
-                  <p className="text-xs text-gray-400">
-                    {new Date(transaction.created_at).toLocaleString()}
-                  </p>
-                  <Badge 
-                    variant="outline" 
-                    className={`mt-1 text-xs ${
-                      transaction.type === 'conversion' ? 'border-blue-400 text-blue-300' :
-                      transaction.type === 'topup' ? 'border-green-400 text-green-300' :
-                      transaction.type === 'withdrawal' ? 'border-red-400 text-red-300' :
-                      'border-gray-400 text-gray-300'
-                    }`}
-                  >
-                    {transaction.type}
-                  </Badge>
-                </div>
-                <div className="text-right">
-                  {transaction.type === 'conversion' ? (
-                    <div className="text-xs">
-                      {transaction.coins_amount !== 0 && (
-                        <p className={transaction.coins_amount > 0 ? "text-green-300" : "text-red-300"}>
-                          {transaction.coins_amount > 0 ? "+" : ""}{transaction.coins_amount.toFixed(2)} ₵
-                        </p>
-                      )}
-                      {transaction.chips_amount !== 0 && (
-                        <p className={transaction.chips_amount > 0 ? "text-green-300" : "text-red-300"}>
-                          {transaction.chips_amount > 0 ? "+" : ""}{transaction.chips_amount.toFixed(2)} chips
-                        </p>
-                      )}
-                    </div>
-                  ) : transaction.type === 'topup' ? (
-                    <div className="text-xs">
-                      <p className="text-green-300">+{Math.abs(transaction.coins_amount || 0).toFixed(2)} ₵</p>
-                      {transaction.php_amount && (
-                        <p className="text-blue-300">₱{transaction.php_amount.toFixed(2)}</p>
-                      )}
-                    </div>
-                  ) : transaction.type === 'withdrawal' ? (
-                    <div className="text-xs">
-                      <p className="text-red-300">-{Math.abs(transaction.chips_amount || 0).toFixed(2)} chips</p>
-                      {transaction.php_amount && (
-                        <p className="text-green-300">₱{transaction.php_amount.toFixed(2)}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className={`font-bold text-xs ${
-                      (transaction.amount || 0) >= 0 ? "text-green-300" : "text-red-300"
-                    }`}>
-                      {(transaction.amount || 0) >= 0 ? "+" : ""}
-                      {(transaction.amount || 0).toFixed(2)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-          {transactions.length === 0 && (
+          {validTransactions.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-6xl mb-4">💳</div>
-              <p className="text-gray-400 text-sm">No transactions yet</p>
-              <p className="text-gray-500 text-xs mt-1">
-                Your wallet activity will appear here
-              </p>
+              <History className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-400">No transactions yet</p>
             </div>
+          ) : (
+            validTransactions
+              .slice(0, 20)
+              .map((transaction: any, index: number) => (
+                <div
+                  key={transaction.id || index}
+                  className="p-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 transition-colors"
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <p className="font-medium text-white text-sm">
+                        {transaction.description || "Transaction"}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(transaction.created_at).toLocaleString()}
+                      </p>
+                      <Badge
+                        variant="outline"
+                        className={`mt-1 text-xs ${
+                          transaction.type === "conversion"
+                            ? "border-blue-400 text-blue-300"
+                            : transaction.type === "topup"
+                            ? "border-green-400 text-green-300"
+                            : transaction.type === "withdrawal"
+                            ? "border-red-400 text-red-300"
+                            : "border-gray-400 text-gray-300"
+                        }`}
+                      >
+                        {transaction.type}
+                      </Badge>
+                    </div>
+                    <div className="text-right">
+                      <p
+                        className={`font-bold text-sm ${
+                          transaction.amount > 0
+                            ? "text-green-400"
+                            : "text-red-400"
+                        }`}
+                      >
+                        {transaction.amount > 0 ? "+" : ""}
+                        {transaction.amount.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-gray-400">chips</p>
+                    </div>
+                  </div>
+                </div>
+              ))
           )}
         </div>
       </CardContent>
