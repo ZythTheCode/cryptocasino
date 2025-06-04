@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { DollarSign, CreditCard, Home, TreePine, Gamepad2, Wallet, Banknote } from "lucide-react";
+import { DollarSign, CreditCard, Home, TreePine, Gamepad2, Wallet, Banknote, Download, Receipt } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
 import { updateUserBalance, createWithdrawalRequest, addTransaction, signIn } from "@/lib/database";
@@ -15,7 +16,125 @@ const WithdrawPage = () => {
   const [withdrawMethod, setWithdrawMethod] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountName, setAccountName] = useState('');
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptData, setReceiptData] = useState<any>(null);
   const { toast } = useToast();
+
+  // Generate random reference number
+  const generateReferenceNumber = () => {
+    const prefix = 'WD';
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `${prefix}${timestamp}${random}`;
+  };
+
+  // Generate and download receipt as JPEG
+  const generateMockReceipt = ({ amount, withdrawMethod, accountNumber, accountName }: any) => {
+    const receiptData = {
+      transactionId: `WD${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      amount: amount,
+      phpAmount: amount * 10,
+      method: withdrawMethod,
+      accountNumber,
+      accountName,
+      timestamp: new Date().toLocaleString(),
+      status: 'Processing'
+    };
+
+    setReceiptData(receiptData);
+    setShowReceipt(true);
+  };
+
+  // Save receipt as JPEG
+  const saveReceiptAsJPEG = () => {
+    if (!receiptData) return;
+
+    // Create a canvas element
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return;
+
+    // Set canvas size
+    canvas.width = 400;
+    canvas.height = 600;
+
+    // Set white background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Set text properties
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+
+    // Header
+    ctx.fillText('WITHDRAWAL RECEIPT', canvas.width / 2, 40);
+
+    // Draw line
+    ctx.beginPath();
+    ctx.moveTo(20, 60);
+    ctx.lineTo(380, 60);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Receipt details
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'left';
+
+    const details = [
+      `Reference Number: ${receiptData.referenceNumber}`,
+      `Transaction ID: ${receiptData.transactionId}`,
+      `Date: ${receiptData.date}`,
+      `Time: ${receiptData.time}`,
+      '',
+      `Username: ${receiptData.username}`,
+      `Amount: ${receiptData.amount} chips`,
+      `PHP Amount: ₱${receiptData.phpAmount.toFixed(2)}`,
+      `Method: ${receiptData.withdrawMethod}`,
+      `Account Number: ${receiptData.accountNumber}`,
+      `Account Name: ${receiptData.accountName}`,
+      '',
+      `Status: ${receiptData.status}`,
+    ];
+
+    let yPosition = 90;
+    details.forEach(detail => {
+      if (detail === '') {
+        yPosition += 10;
+      } else {
+        ctx.fillText(detail, 30, yPosition);
+        yPosition += 25;
+      }
+    });
+
+    // Footer
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#666666';
+    ctx.fillText('This is a demo receipt for testing purposes only', canvas.width / 2, canvas.height - 60);
+    ctx.fillText('Thank you for using our service!', canvas.width / 2, canvas.height - 40);
+
+    // Convert to JPEG and download
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `withdrawal_receipt_${receiptData.referenceNumber}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Receipt Saved",
+        description: "Receipt has been saved as JPEG file",
+      });
+    }, 'image/jpeg', 0.9);
+  };
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -23,7 +142,7 @@ const WithdrawPage = () => {
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
         setUser(parsedUser);
-        
+
         // Sync with Supabase to get latest data
         try {
           const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
@@ -46,7 +165,7 @@ const WithdrawPage = () => {
         }, 100);
       }
     };
-    
+
     loadUserData();
   }, []);
 
@@ -102,7 +221,7 @@ const WithdrawPage = () => {
         withdrawal_method: withdrawMethod,
         account_number: accountNumber,
         account_name: accountName,
-        php_amount: chipsAmount * 10
+        bank_name: withdrawMethod
       });
 
       // Add transaction record in Supabase
@@ -117,7 +236,15 @@ const WithdrawPage = () => {
       setUser(updatedUser);
       localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
 
-    toast({
+      // Generate mock receipt BEFORE showing success toast
+      generateMockReceipt({
+        amount: chipsAmount,
+        withdrawMethod,
+        accountNumber,
+        accountName
+      });
+
+      toast({
         title: "Withdrawal Successful!",
         description: `₱${(chipsAmount * 10).toFixed(2)} will be sent to your ${withdrawMethod} account`,
       });
@@ -271,7 +398,7 @@ const WithdrawPage = () => {
                 <Button 
                   onClick={handleWithdraw}
                   className="w-full py-3 text-lg bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700"
-                  disabled={!amount || !withdrawMethod || !accountNumber || !accountName || parseFloat(amount) > (user?.chips || 0)}
+                  disabled={!amount || !withdrawMethod || !accountNumber || !accountName || parseFloat(amount) > (user?.chips || 0) || parseFloat(amount) < 50}
                 >
                   Withdraw {amount ? `${amount} chips (₱${(parseFloat(amount) * 10).toFixed(2)})` : 'Chips'}
                 </Button>
@@ -280,6 +407,122 @@ const WithdrawPage = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Receipt Modal */}
+      {showReceipt && receiptData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
+            <div id="receipt-content" className="text-black space-y-4">
+              <div className="text-center border-b pb-4">
+                <h2 className="text-xl font-bold">Withdrawal Receipt</h2>
+                <p className="text-sm text-gray-600">Transaction ID: {receiptData.transactionId}</p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span>Amount (Chips):</span>
+                  <span className="font-semibold">{receiptData.amount}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>PHP Amount:</span>
+                  <span className="font-semibold">₱{receiptData.phpAmount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Method:</span>
+                  <span className="font-semibold">{receiptData.method}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Account Name:</span>
+                  <span className="font-semibold">{receiptData.accountName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Account Number:</span>
+                  <span className="font-semibold">{receiptData.accountNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Status:</span>
+                  <span className="font-semibold text-orange-600">{receiptData.status}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Date:</span>
+                  <span className="font-semibold">{receiptData.timestamp}</span>
+                </div>
+              </div>
+
+              <div className="text-center text-xs text-gray-500 border-t pt-4">
+                <p>This is a computer-generated receipt.</p>
+                <p>Please keep this for your records.</p>
+              </div>
+            </div>
+
+            <div className="flex space-x-3 mt-6">
+              <Button 
+                onClick={() => {
+                  const element = document.getElementById('receipt-content');
+                  if (element) {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+
+                    // Simple text-based receipt generation
+                    canvas.width = 400;
+                    canvas.height = 500;
+
+                    if (ctx) {
+                      ctx.fillStyle = 'white';
+                      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                      ctx.fillStyle = 'black';
+                      ctx.font = 'bold 16px Arial';
+                      ctx.textAlign = 'center';
+                      ctx.fillText('Withdrawal Receipt', 200, 30);
+
+                      ctx.font = '12px Arial';
+                      ctx.textAlign = 'left';
+                      let y = 70;
+
+                      ctx.fillText(`Transaction ID: ${receiptData.transactionId}`, 20, y); y += 30;
+                      ctx.fillText(`Amount (Chips): ${receiptData.amount}`, 20, y); y += 25;
+                      ctx.fillText(`PHP Amount: ₱${receiptData.phpAmount.toFixed(2)}`, 20, y); y += 25;
+                      ctx.fillText(`Method: ${receiptData.method}`, 20, y); y += 25;
+                      ctx.fillText(`Account Name: ${receiptData.accountName}`, 20, y); y += 25;
+                      ctx.fillText(`Account Number: ${receiptData.accountNumber}`, 20, y); y += 25;
+                      ctx.fillText(`Status: ${receiptData.status}`, 20, y); y += 25;
+                      ctx.fillText(`Date: ${receiptData.timestamp}`, 20, y); y += 50;
+
+                      ctx.font = '10px Arial';
+                      ctx.textAlign = 'center';
+                      ctx.fillText('This is a computer-generated receipt.', 200, y);
+                      ctx.fillText('Please keep this for your records.', 200, y + 15);
+
+                      // Download as image
+                      canvas.toBlob((blob) => {
+                        if (blob) {
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `withdrawal-receipt-${receiptData.transactionId}.png`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }
+                      });
+                    }
+                  }
+                }}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+              >
+                Save as Image
+              </Button>
+              <Button 
+                onClick={() => setShowReceipt(false)}
+                variant="outline" 
+                className="flex-1"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

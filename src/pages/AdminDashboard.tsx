@@ -138,7 +138,12 @@ const AdminDashboard = () => {
 
         setUser(parsedUser);
         await loadData();
-        setupRealtimeSubscriptions();
+        
+        // Setup subscriptions and store cleanup function
+        const cleanup = setupRealtimeSubscriptions();
+        
+        // Return cleanup function
+        return cleanup;
       } catch (error) {
         console.error('Error loading user and data:', error);
         toast({
@@ -203,8 +208,9 @@ const AdminDashboard = () => {
   const setupRealtimeSubscriptions = () => {
     if (!supabase) return;
 
-    const usersSubscription = supabase
-      .channel('users_realtime')
+    // Create a single channel for all subscriptions to avoid conflicts
+    const realtimeChannel = supabase
+      .channel('admin_realtime')
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -231,19 +237,31 @@ const AdminDashboard = () => {
           });
         }
       })
-      .subscribe();
-
-    const topupSubscription = supabase
-      .channel('topup_realtime')
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'topup_requests'
-      }, (payload) => {
+      }, async (payload) => {
         console.log('Topup change detected:', payload);
 
         if (payload.eventType === 'INSERT' && payload.new.status === 'pending') {
-          setPendingTopUps(prev => [payload.new, ...prev]);
+          // Get user data for display
+          try {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('username')
+              .eq('id', payload.new.user_id)
+              .single();
+
+            const topupWithUser = {
+              ...payload.new,
+              users: userData
+            };
+
+            setPendingTopUps(prev => [topupWithUser, ...prev]);
+          } catch (error) {
+            setPendingTopUps(prev => [payload.new, ...prev]);
+          }
         } else if (payload.eventType === 'UPDATE') {
           if (payload.new.status === 'pending') {
             setPendingTopUps(prev => prev.map(topup => 
@@ -254,10 +272,6 @@ const AdminDashboard = () => {
           }
         }
       })
-      .subscribe();
-
-    const transactionSubscription = supabase
-      .channel('transaction_realtime')
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -266,26 +280,29 @@ const AdminDashboard = () => {
         console.log('New transaction detected:', payload);
 
         try {
-          if (supabase) {
-            const { data: userData } = await supabase
-              .from('users')
-              .select('username')
-              .eq('id', payload.new.user_id)
-              .single();
+          const { data: userData } = await supabase
+            .from('users')
+            .select('username')
+            .eq('id', payload.new.user_id)
+            .single();
 
-            const newTransaction = {
-              ...payload.new,
-              users: userData,
-              username: userData?.username || 'Unknown User'
-            };
+          const newTransaction = {
+            ...payload.new,
+            users: userData,
+            username: userData?.username || 'Unknown User'
+          };
 
-            setAllTransactions(prev => [newTransaction, ...prev.slice(0, 99)]);
-          }
+          setAllTransactions(prev => [newTransaction, ...prev.slice(0, 99)]);
         } catch (error) {
           console.error('Error fetching user for transaction:', error);
         }
       })
       .subscribe();
+
+    // Cleanup function
+    return () => {
+      realtimeChannel.unsubscribe();
+    };
   };
 
   const filterUsers = () => {
@@ -461,16 +478,40 @@ const AdminDashboard = () => {
     if (!topUp) return;
 
     try {
+      // Find target user by user_id first, then by username from the topup request
       let targetUser = allUsers.find((u: any) => u.id === topUp.user_id);
 
-      if (!targetUser && topUp.username) {
-        targetUser = allUsers.find((u: any) => u.username === topUp.username);
+      // If not found by ID, try to find by username from topup data
+      if (!targetUser) {
+        const username = topUp.username || topUp.users?.username;
+        if (username) {
+          targetUser = allUsers.find((u: any) => u.username === username);
+        }
+      }
+
+      // If still not found, try to fetch from database
+      if (!targetUser && topUp.user_id) {
+        try {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', topUp.user_id)
+            .single();
+
+          if (userData) {
+            targetUser = userData;
+            // Add to local users list
+            setAllUsers(prev => [userData, ...prev.filter(u => u.id !== userData.id)]);
+          }
+        } catch (dbError) {
+          console.error('Error fetching user from database:', dbError);
+        }
       }
 
       if (!targetUser) {
         toast({
           title: "Error",
-          description: "User not found",
+          description: "User not found. Please refresh the page and try again.",
           variant: "destructive",
         });
         return;
@@ -478,31 +519,39 @@ const AdminDashboard = () => {
 
       const newChipsAmount = (targetUser.chips || 0) + topUp.amount;
 
-      const updatedUser = await updateUserBalance(targetUser.id, {
+      // Update user balance
+      await updateUserBalance(targetUser.id, {
         chips: newChipsAmount
       });
 
+      // Update local state
       setAllUsers(prev => prev.map(u => 
         u.id === targetUser.id 
           ? { ...u, chips: newChipsAmount }
           : u
       ));
 
+      // Update current user if it's the same person
       if (user?.id === targetUser.id) {
         const updatedCurrentUser = { ...user, chips: newChipsAmount };
         setUser(updatedCurrentUser);
         localStorage.setItem('casinoUser', JSON.stringify(updatedCurrentUser));
       }
 
+      // Add transaction record
       await addTransaction({
         user_id: targetUser.id,
         type: 'topup',
         amount: topUp.amount,
-        description: `Top-up approved via ${topUp.payment_method} - ${topUp.reference_number}`,
+        description: `Top-up approved via ${topUp.payment_method} - ${topUp.reference || topUp.reference_number}`,
         php_amount: topUp.amount * 10
       });
 
+      // Update topup request status
       await updateTopupRequestStatus(topUpId, 'approved', user.username);
+
+      // Remove from pending list
+      setPendingTopUps(prev => prev.filter(t => t.id !== topUpId));
 
       toast({
         title: "Top-up Approved",
@@ -513,7 +562,7 @@ const AdminDashboard = () => {
       console.error('Error approving top-up:', error);
       toast({
         title: "Error",
-        description: "Failed to approve top-up. Please try again.",
+        description: `Failed to approve top-up: ${error.message || 'Please try again'}`,
         variant: "destructive",
       });
     }
@@ -522,6 +571,9 @@ const AdminDashboard = () => {
   const handleRejectTopUp = async (topUpId: string) => {
     try {
       await updateTopupRequestStatus(topUpId, 'rejected', user.username);
+
+      // Remove from pending list
+      setPendingTopUps(prev => prev.filter(t => t.id !== topUpId));
 
       toast({
         title: "Top-up Rejected",
@@ -533,7 +585,7 @@ const AdminDashboard = () => {
       console.error('Error rejecting top-up:', error);
       toast({
         title: "Error",
-        description: "Failed to reject top-up. Please try again.",
+        description: `Failed to reject top-up: ${error.message || 'Please try again'}`,
         variant: "destructive",
       });
     }
@@ -541,25 +593,52 @@ const AdminDashboard = () => {
 
   const viewReceipt = (topUpId: string) => {
     const topUp = pendingTopUps.find(t => t.id === topUpId);
-    if (topUp?.receipt_data) {
-      const newWindow = window.open();
-      if (newWindow) {
-        newWindow.document.write(`<img src="${topUp.receipt_data}" style="max-width: 100%; height: auto;" />`);
-      }
+    if (!topUp) {
+      toast({
+        title: "Error",
+        description: "Top-up request not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check for receipt_url first (new format), then receipt_data (base64), then localStorage
+    let receiptUrl = null;
+    
+    if (topUp.receipt_url) {
+      receiptUrl = topUp.receipt_url;
+    } else if (topUp.receipt_data || topUp.receipt) {
+      receiptUrl = topUp.receipt_data || topUp.receipt;
     } else {
+      // Fallback to localStorage for legacy data
       const receiptData = localStorage.getItem(`receipt_${topUpId}`);
       if (receiptData) {
-        const newWindow = window.open();
-        if (newWindow) {
-          newWindow.document.write(`<img src="${receiptData}" style="max-width: 100%; height: auto;" />`);
-        }
-      } else {
-        toast({
-          title: "No Receipt",
-          description: "No receipt found for this request",
-          variant: "destructive",
-        });
+        receiptUrl = receiptData;
       }
+    }
+
+    if (receiptUrl) {
+      const newWindow = window.open();
+      if (newWindow) {
+        newWindow.document.write(`
+          <html>
+            <head><title>Receipt - ${topUp.reference || topUp.reference_number}</title></head>
+            <body style="margin: 0; padding: 20px; background: #f5f5f5;">
+              <div style="max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <h2 style="margin-top: 0; text-align: center; color: #333;">Payment Receipt</h2>
+                <p style="text-align: center; color: #666; margin-bottom: 20px;">Reference: ${topUp.reference || topUp.reference_number || 'N/A'}</p>
+                <img src="${receiptUrl}" style="max-width: 100%; height: auto; display: block; margin: 0 auto; border: 1px solid #ddd; border-radius: 4px;" />
+              </div>
+            </body>
+          </html>
+        `);
+      }
+    } else {
+      toast({
+        title: "No Receipt",
+        description: "No receipt found for this request",
+        variant: "destructive",
+      });
     }
   };
 

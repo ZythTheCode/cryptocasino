@@ -72,50 +72,73 @@ const TopUpPage = () => {
       return;
     }
 
+    if (chipsAmount < 10) {
+      toast({
+        title: "Minimum Top-up Required",
+        description: "Minimum top-up amount is 10 chips (₱100)",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      // Convert receipt to base64
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const receiptData = e.target?.result as string;
+      toast({
+        title: "Uploading Receipt",
+        description: "Please wait while we process your request...",
+      });
 
-        const topUpRequestData = {
-          user_id: user.id,
-          username: user.username,
-          amount: chipsAmount,
-          payment_method: paymentMethod,
-          reference_number: reference,
-          notes,
-          receipt_name: receipt.name,
-          receipt_data: receiptData,
-          status: 'pending'
-        };
+      // Upload receipt to Supabase storage
+      const fileExt = receipt.name.split('.').pop();
+      const fileName = `${user.id}_${Date.now()}.${fileExt}`;
 
-        // Save to database
-        const success = await createTopupRequest(topUpRequestData);
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('receipts')
+        .upload(fileName, receipt);
 
-        if (success) {
-          toast({
-            title: "Top-up Request Submitted",
-            description: `₱${(chipsAmount * 10).toFixed(2)} top-up request sent for admin approval`,
-          });
+      if (uploadError) {
+        throw new Error(`Failed to upload receipt: ${uploadError.message}`);
+      }
 
-          // Reset form
-          setAmount('');
-          setPaymentMethod('');
-          setReceipt(null);
-          setReference('');
-          setNotes('');
-        } else {
-          throw new Error('Failed to save top-up request');
-        }
+      // Get public URL for the uploaded receipt
+      const { data: publicUrlData } = supabase.storage
+        .from('receipts')
+        .getPublicUrl(fileName);
+
+      const topUpRequestData = {
+        user_id: user.id,
+        username: user.username,
+        amount: chipsAmount,
+        payment_method: paymentMethod,
+        reference_number: reference,
+        notes,
+        receipt_name: receipt.name,
+        receipt_url: publicUrlData.publicUrl,
+        status: 'pending'
       };
 
-      reader.readAsDataURL(receipt);
+      // Save to database
+      const success = await createTopupRequest(topUpRequestData);
+
+      if (success) {
+        toast({
+          title: "Top-up Request Submitted",
+          description: `₱${(chipsAmount * 10).toFixed(2)} top-up request sent for admin approval`,
+        });
+
+        // Reset form
+        setAmount('');
+        setPaymentMethod('');
+        setReceipt(null);
+        setReference('');
+        setNotes('');
+      } else {
+        throw new Error('Failed to save top-up request');
+      }
     } catch (error) {
       console.error('Error submitting top-up request:', error);
       toast({
         title: "Error",
-        description: "Failed to submit top-up request. Please try again.",
+        description: `Failed to submit top-up request: ${error.message}`,
         variant: "destructive",
       });
     }
@@ -186,9 +209,10 @@ const TopUpPage = () => {
           </CardHeader>
           <CardContent>
             <div className="p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
-              <div className="text-center mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
-                <p className="font-bold text-xl text-green-700">1 Chip = ₱10 PHP</p>
-                <p className="text-sm text-green-600 mt-1">Minimum top-up: 10 chips (₱100)</p>
+              <div className="text-center mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="font-bold text-xl text-blue-700">1 Chip = ₱10 PHP</p>
+                <p className="text-sm text-blue-600 mt-1">Minimum top-up: 10 chips (₱100)</p>
+                <p className="text-sm text-blue-600">Current balance: {user?.chips?.toFixed(2) || 0} chips</p>
               </div>
 
               <div className="space-y-4">
@@ -197,6 +221,7 @@ const TopUpPage = () => {
                   <Input
                     type="number"
                     min="10"
+                    step="1"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="Enter chips amount (minimum 10)"
@@ -266,7 +291,7 @@ const TopUpPage = () => {
                 <Button 
                   onClick={handleSubmitTopUp}
                   className="w-full py-3 text-lg bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
-                  disabled={!amount || !paymentMethod || !receipt || !reference}
+                  disabled={!amount || !paymentMethod || !receipt || !reference || parseFloat(amount) < 10}
                 >
                   Submit Top-up Request
                 </Button>
