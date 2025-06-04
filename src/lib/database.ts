@@ -132,9 +132,20 @@ export async function createTopupRequest(requestData: {
   notes?: string | null
   status: string
 }) {
+  // Map to actual database column names
+  const dbRequestData = {
+    user_id: requestData.user_id,
+    amount: requestData.amount,
+    payment_method: requestData.payment_method,
+    reference: requestData.reference_number, // Use 'reference' instead of 'reference_number'
+    receipt: requestData.receipt_data, // Use 'receipt' instead of 'receipt_data'
+    notes: requestData.notes,
+    status: requestData.status
+  };
+  
   const { data, error } = await supabase
     .from('topup_requests')
-    .insert([requestData])
+    .insert([dbRequestData])
     .select()
     .single()
 
@@ -148,15 +159,30 @@ export async function createWithdrawalRequest(requestData: {
   amount: number
   payment_method: string
   account_details: string
-  status: string
+  account_name?: string
+  status?: string
 }) {
+  // Map to actual database column names
+  const dbRequestData = {
+    user_id: requestData.user_id,
+    amount: requestData.amount,
+    payment_method: requestData.payment_method,
+    account_details: requestData.account_details,
+    account_name: requestData.account_name || requestData.username || null, // Ensure fallback to null if no username
+    status: requestData.status || 'pending',
+    php_amount: requestData.amount * 10 // Calculate PHP amount (1 chip = 10 PHP)
+  };
+  
   const { data, error } = await supabase
     .from('withdrawal_requests')
-    .insert([requestData])
+    .insert([dbRequestData])
     .select()
     .single()
 
-  if (error) throw error
+  if (error) {
+    console.error('Withdrawal request error:', error);
+    throw error;
+  }
   return data
 }
 
