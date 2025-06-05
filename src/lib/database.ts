@@ -129,8 +129,6 @@ export async function createTopupRequest(requestData: {
   payment_method: string
   reference_number: string
   receipt_data?: string | null
-  receipt_url?: string | null
-  receipt_name?: string | null
   notes?: string | null
   status: string
 }) {
@@ -140,12 +138,11 @@ export async function createTopupRequest(requestData: {
     amount: requestData.amount,
     payment_method: requestData.payment_method,
     reference: requestData.reference_number, // Use 'reference' instead of 'reference_number'
-    receipt: requestData.receipt_data || requestData.receipt_url, // Support both formats
-    receipt_url: requestData.receipt_url, // Store URL separately if available
+    receipt: requestData.receipt_data, // Use 'receipt' instead of 'receipt_data'
     notes: requestData.notes,
     status: requestData.status
   };
-
+  
   const { data, error } = await supabase
     .from('topup_requests')
     .insert([dbRequestData])
@@ -160,24 +157,53 @@ export async function createWithdrawalRequest(requestData: {
   user_id: string
   username: string
   amount: number
-  withdrawal_method?: string
-  payment_method?: string
-  account_number?: string
-  account_name?: string
-  bank_name?: string
+  payment_method: string
+  account_number: string
+  account_name: string
   status?: string
 }) {
-  // Map to actual database column names based on the error messages
+  // Comprehensive validation
+  if (!requestData) {
+    throw new Error('Request data is required');
+  }
+
+  if (!requestData.user_id || !requestData.user_id.trim()) {
+    throw new Error('User ID is required');
+  }
+
+  if (!requestData.amount || requestData.amount <= 0) {
+    throw new Error('Valid amount is required');
+  }
+
+  if (!requestData.payment_method || !requestData.payment_method.trim()) {
+    throw new Error('Payment method is required');
+  }
+
+  if (!requestData.account_number || !requestData.account_number.trim()) {
+    throw new Error('Account number is required');
+  }
+
+  if (!requestData.account_name || !requestData.account_name.trim()) {
+    throw new Error('Account name is required');
+  }
+
+  // Create account_details string from account info
+  const accountDetails = `${requestData.payment_method} - ${requestData.account_name} (${requestData.account_number})`;
+
+  // Map to actual database column names
   const dbRequestData = {
-    user_id: requestData.user_id,
-    amount: requestData.amount,
-    php_amount: requestData.amount * 10, // Calculate PHP amount (1 chip = 10 PHP)
-    account_name: requestData.account_name || requestData.username || '',
-    account_number: requestData.account_number || '',
-    bank_name: requestData.bank_name || requestData.withdrawal_method || requestData.payment_method || 'gcash',
-    status: requestData.status || 'pending'
+    user_id: requestData.user_id.trim(),
+    amount: Number(requestData.amount),
+    payment_method: requestData.payment_method.trim(),
+    account_number: requestData.account_number.trim(),
+    account_name: requestData.account_name.trim(),
+    account_details: accountDetails,
+    status: requestData.status || 'pending',
+    php_amount: Number(requestData.amount) * 10 // Calculate PHP amount (1 chip = 10 PHP)
   };
 
+  console.log('Creating withdrawal request with data:', dbRequestData);
+  
   const { data, error } = await supabase
     .from('withdrawal_requests')
     .insert([dbRequestData])
@@ -185,8 +211,23 @@ export async function createWithdrawalRequest(requestData: {
     .single()
 
   if (error) {
-    console.error('Withdrawal request error:', error);
-    throw error;
+    console.error('Supabase withdrawal request error:', error);
+    
+    // Handle specific database errors
+    if (error.code === '23502' && error.message.includes('account_number')) {
+      throw new Error('Account number cannot be empty');
+    }
+    if (error.code === '23502' && error.message.includes('account_name')) {
+      throw new Error('Account name cannot be empty');
+    }
+    if (error.code === '23502' && error.message.includes('account_details')) {
+      throw new Error('Account details are required');
+    }
+    if (error.code === '23502') {
+      throw new Error('Required field is missing');
+    }
+    
+    throw new Error(`Database error: ${error.message}`);
   }
   return data
 }
@@ -206,7 +247,9 @@ export async function updateTopupRequestStatus(requestId: string, status: string
   const { data, error } = await supabase
     .from('topup_requests')
     .update({ 
-      status
+      status, 
+      processed_by: processedBy,
+      processed_at: new Date().toISOString()
     })
     .eq('id', requestId)
     .select()
@@ -413,14 +456,14 @@ export async function getTreeUpgrade(userId: string) {
     // Keep the most recent record and delete the rest
     const keepRecord = allRecords[0]
     const deleteIds = allRecords.slice(1).map(record => record.id)
-
+    
     if (deleteIds.length > 0) {
       await supabase
         .from('tree_upgrades')
         .delete()
         .in('id', deleteIds)
     }
-
+    
     return keepRecord
   }
 
@@ -466,11 +509,11 @@ export async function updateTreeUpgrade(userId: string, updates: Partial<any>) {
     const safeUpdates: any = {
       updated_at: new Date().toISOString()
     }
-
+    
     if (updates.tree_level !== undefined && typeof updates.tree_level === 'number') {
       safeUpdates.tree_level = Math.max(1, Math.floor(updates.tree_level))
     }
-
+    
     if (updates.last_claim !== undefined) {
       // Ensure we have a valid date string
       const claimDate = typeof updates.last_claim === 'string' 
@@ -678,4 +721,3 @@ export interface User {
   created_at: string
   updated_at: string
 }
-

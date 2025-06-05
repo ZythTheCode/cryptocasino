@@ -68,7 +68,7 @@ const TransactionHistory = ({ user, filterType = 'all', gameFilter, maxItems = 5
       const formattedTransactions = filteredTransactions.map((tx: any) => ({
         ...tx,
         timestamp: new Date(tx.created_at).getTime(),
-        description: tx.description || `${tx.type} transaction`
+        description: (tx.description || `${tx.type} transaction`).replace(/\s*-\s*null\s*$/i, '')
       }));
 
       setTransactions(formattedTransactions);
@@ -183,7 +183,7 @@ const TransactionHistory = ({ user, filterType = 'all', gameFilter, maxItems = 5
                 >
                   <div className="flex-1">
                     <p className="font-medium">
-                      {transaction.game && `${transaction.game} - `}
+                      {transaction.game && transaction.game !== 'null' && `${transaction.game} - `}
                       {transaction.description}
                     </p>
                     <p className="text-xs text-gray-500">

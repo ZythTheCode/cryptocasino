@@ -126,10 +126,10 @@ const TopUpWithdrawPage = () => {
   const handleTopUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (topupAmount <= 0) {
+    if (topupAmount < 10) {
       toast({
-        title: "Invalid Amount",
-        description: "Please enter a valid amount",
+        title: "Minimum Amount Required",
+        description: "Minimum top-up amount is 10 chips (₱100)",
         variant: "destructive",
       });
       return;
@@ -196,10 +196,10 @@ const TopUpWithdrawPage = () => {
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (withdrawAmount <= 0) {
+    if (withdrawAmount < 10) {
       toast({
-        title: "Invalid Amount",
-        description: "Please enter a valid amount",
+        title: "Minimum Amount Required",
+        description: "Minimum withdrawal amount is 10 chips (₱100)",
         variant: "destructive",
       });
       return;
@@ -399,7 +399,7 @@ const TopUpWithdrawPage = () => {
                       onChange={(e) => setTopupAmount(Number(e.target.value))}
                       placeholder="Enter amount of chips"
                       className="bg-black/40 border-white/20 text-white"
-                      min="1"
+                      min="10"
                       required
                     />
                     <p className="text-xs text-gray-400 mt-1">
@@ -494,7 +494,7 @@ const TopUpWithdrawPage = () => {
                       onChange={(e) => setWithdrawAmount(Number(e.target.value))}
                       placeholder="Enter amount of chips"
                       className="bg-black/40 border-white/20 text-white"
-                      min="1"
+                      min="10"
                       max={user.chips}
                       required
                     />

@@ -141,8 +141,9 @@ const WalletPage = () => {
 
   useEffect(() => {
     if (user?.id && supabase) {
+      const uniqueId = `${user.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const subscription = supabase
-        .channel(`wallet_transactions_${user.id}_${Date.now()}`)
+        .channel(`wallet_transactions_${uniqueId}`)
         .on('postgres_changes', {
           event: '*',
           schema: 'public',
@@ -686,33 +687,263 @@ const TopUpSection = ({ user }: any) => {
 const WithdrawSection = ({ user }: any) => {
   const [amount, setAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState('gcash');
-  const [accountDetails, setAccountDetails] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
+  const generateWithdrawalReceipt = (withdrawalData: any) => {
+    // Create a receipt component in the current page first
+    const receiptContainer = document.createElement('div');
+    receiptContainer.id = 'receipt-container';
+    receiptContainer.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      color: black;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+      z-index: 10000;
+      max-width: 400px;
+      width: 90%;
+      font-family: Arial, sans-serif;
+    `;
+
+    receiptContainer.innerHTML = `
+      <div style="text-align: center; border-bottom: 2px solid #333; margin-bottom: 20px; padding-bottom: 10px;">
+        <h2 style="margin: 0; color: #333;">WITHDRAWAL RECEIPT</h2>
+        <p style="margin: 5px 0; color: #666;">Casino Withdrawal Request</p>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Transaction ID:</strong></span>
+        <span>WD-${Date.now()}</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Date:</strong></span>
+        <span>${new Date().toLocaleString()}</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Username:</strong></span>
+        <span>${withdrawalData.username}</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Amount:</strong></span>
+        <span style="font-weight: bold; color: #e74c3c;">${withdrawalData.amount} chips</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>PHP Amount:</strong></span>
+        <span style="font-weight: bold; color: #e74c3c;">₱${(withdrawalData.amount * 10).toFixed(2)}</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Payment Method:</strong></span>
+        <span>${withdrawalData.payment_method}</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Account Number:</strong></span>
+        <span>${withdrawalData.account_number}</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Account Name:</strong></span>
+        <span>${withdrawalData.account_name}</span>
+      </div>
+      
+      <div style="margin: 15px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+        <span><strong>Status:</strong></span>
+        <span style="color: #f39c12; font-weight: bold;">Pending Admin Approval</span>
+      </div>
+      
+      <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 12px; color: #666;">
+        <p style="margin: 5px 0;">This is a demo receipt for testing purposes only</p>
+        <p style="margin: 5px 0;">Processing time: 1-3 business days</p>
+      </div>
+      
+      <div style="text-align: center; margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
+        <button id="download-jpg" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+          📄 Save as JPG
+        </button>
+        <button id="close-receipt" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          ✕ Close
+        </button>
+      </div>
+    `;
+
+    // Add backdrop
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 9999;
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(receiptContainer);
+
+    // Handle close button
+    const closeBtn = receiptContainer.querySelector('#close-receipt');
+    closeBtn?.addEventListener('click', () => {
+      document.body.removeChild(receiptContainer);
+      document.body.removeChild(backdrop);
+    });
+
+    // Handle download button
+    const downloadBtn = receiptContainer.querySelector('#download-jpg');
+    downloadBtn?.addEventListener('click', async () => {
+      try {
+        // Create canvas for JPG conversion
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        canvas.width = 600;
+        canvas.height = 800;
+        
+        // White background
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Header
+        ctx.fillStyle = 'black';
+        ctx.font = 'bold 24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('WITHDRAWAL RECEIPT', canvas.width/2, 50);
+        
+        ctx.font = '16px Arial';
+        ctx.fillText('Casino Withdrawal Request', canvas.width/2, 75);
+        
+        // Draw line
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(50, 90);
+        ctx.lineTo(canvas.width - 50, 90);
+        ctx.stroke();
+        
+        // Receipt details
+        ctx.textAlign = 'left';
+        ctx.font = '14px Arial';
+        ctx.fillStyle = 'black';
+        
+        let y = 130;
+        const lineHeight = 35;
+        const details = [
+          ['Transaction ID:', `WD-${Date.now()}`],
+          ['Date:', new Date().toLocaleString()],
+          ['Username:', withdrawalData.username],
+          ['Amount:', `${withdrawalData.amount} chips`],
+          ['PHP Amount:', `₱${(withdrawalData.amount * 10).toFixed(2)}`],
+          ['Payment Method:', withdrawalData.payment_method],
+          ['Account Number:', withdrawalData.account_number],
+          ['Account Name:', withdrawalData.account_name],
+          ['Status:', 'Pending Admin Approval']
+        ];
+        
+        details.forEach(([label, value]) => {
+          ctx.fillStyle = '#333';
+          ctx.fillText(label, 60, y);
+          ctx.fillStyle = 'black';
+          ctx.fillText(value, 250, y);
+          
+          // Dotted line
+          ctx.strokeStyle = '#ccc';
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath();
+          ctx.moveTo(60, y + 5);
+          ctx.lineTo(540, y + 5);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          
+          y += lineHeight;
+        });
+        
+        // Footer
+        ctx.fillStyle = '#666';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        y += 30;
+        ctx.fillText('This is a demo receipt for testing purposes only', canvas.width/2, y);
+        ctx.fillText('Processing time: 1-3 business days', canvas.width/2, y + 15);
+        
+        // Convert to JPG and download
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `withdrawal-receipt-${Date.now()}.jpg`;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            toast({
+              title: "Receipt Downloaded! 📄",
+              description: "Your withdrawal receipt has been saved as JPG",
+            });
+          }
+        }, 'image/jpeg', 0.9);
+      } catch (error) {
+        console.error('Error generating JPG:', error);
+        toast({
+          title: "Download Failed",
+          description: "Could not generate JPG. Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
+
+    // Close on backdrop click
+    backdrop.addEventListener('click', () => {
+      document.body.removeChild(receiptContainer);
+      document.body.removeChild(backdrop);
+    });
+  };
+
   const handleSubmit = async () => {
+    // Comprehensive validation with specific error messages
+    const validationErrors = [];
+
     if (!amount || amount <= 0) {
-      toast({
-        title: "Invalid Amount",
-        description: "Please enter a valid amount",
-        variant: "destructive",
-      });
-      return;
+      validationErrors.push("Please enter a valid amount greater than 0");
     }
 
-    if (amount > user.chips) {
-      toast({
-        title: "Insufficient Chips",
-        description: "You don't have enough chips for this withdrawal",
-        variant: "destructive",
-      });
-      return;
+    if (amount && amount > user.chips) {
+      validationErrors.push("You don't have enough chips for this withdrawal");
     }
 
-    if (!accountDetails.trim()) {
+    if (amount && amount < 10) {
+      validationErrors.push("Minimum withdrawal amount is 10 chips");
+    }
+
+    if (!paymentMethod || !paymentMethod.trim()) {
+      validationErrors.push("Please select a payment method");
+    }
+
+    if (!accountNumber || !accountNumber.trim()) {
+      validationErrors.push("Please enter your account number");
+    }
+
+    if (!accountName || !accountName.trim()) {
+      validationErrors.push("Please enter the account holder name");
+    }
+
+    // Show validation errors
+    if (validationErrors.length > 0) {
       toast({
-        title: "Account Details Required",
-        description: "Please enter your account details",
+        title: "Form Validation Failed",
+        description: validationErrors[0], // Show first error
         variant: "destructive",
       });
       return;
@@ -721,37 +952,61 @@ const WithdrawSection = ({ user }: any) => {
     setIsSubmitting(true);
 
     try {
-      await createWithdrawalRequest({
-        user_id: user.id,
-        username: user.username,
-        amount: amount,
-        payment_method: paymentMethod,
-        account_details: accountDetails,
-        account_name: user.username, // Use username as account name
+      const withdrawalData = {
+        user_id: user.id || '',
+        username: user.username || '',
+        amount: Number(amount),
+        payment_method: paymentMethod.trim(),
+        account_number: accountNumber.trim(),
+        account_name: accountName.trim(),
         status: 'pending'
-      });
+      };
+
+      console.log('Submitting withdrawal request:', withdrawalData);
+
+      await createWithdrawalRequest(withdrawalData);
 
       // Add transaction record
       await addTransaction({
         user_id: user.id,
         type: 'withdrawal',
-        amount: -amount,
+        amount: -Number(amount),
         description: `Withdrawal request: ${amount} chips to ${paymentMethod}`,
         reference: `WD-${Date.now()}`
       });
 
+      // Generate receipt
+      generateWithdrawalReceipt(withdrawalData);
+
       toast({
         title: "Withdrawal Request Submitted! 💸",
-        description: "Your request is pending admin approval. Processing may take 1-3 business days.",
+        description: "Your request is pending admin approval. Receipt generated successfully.",
       });
 
+      // Reset form
       setAmount(0);
-      setAccountDetails('');
-    } catch (error) {
+      setAccountNumber('');
+      setAccountName('');
+    } catch (error: any) {
       console.error('Withdrawal submission error:', error);
+      
+      let errorMessage = "Failed to submit withdrawal request. Please try again.";
+      
+      if (error.message) {
+        if (error.message.includes('Account number')) {
+          errorMessage = "Please check your account number and try again.";
+        } else if (error.message.includes('Account name')) {
+          errorMessage = "Please check your account name and try again.";
+        } else if (error.message.includes('required')) {
+          errorMessage = "Please fill in all required fields.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+
       toast({
         title: "Submission Failed",
-        description: "Failed to submit withdrawal request. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -808,18 +1063,40 @@ const WithdrawSection = ({ user }: any) => {
         </div>
 
         <div>
-          <Label className="text-white">Account Details *</Label>
-          <Textarea
-            placeholder="Enter your account number/details for the selected payment method"
-            value={accountDetails}
-            onChange={(e) => setAccountDetails(e.target.value)}
-            className="bg-black/40 border-white/20 text-white"
+          <Label className="text-white">Account Number *</Label>
+          <Input
+            placeholder="Enter your account number"
+            value={accountNumber}
+            onChange={(e) => setAccountNumber(e.target.value)}
+            className={`bg-black/40 border-white/20 text-white ${
+              accountNumber.trim() ? 'border-green-400/50' : ''
+            }`}
+            required
           />
+          {accountNumber.trim() && (
+            <p className="text-xs text-green-300 mt-1">✓ Account number entered</p>
+          )}
+        </div>
+
+        <div>
+          <Label className="text-white">Account Name *</Label>
+          <Input
+            placeholder="Enter the account holder name"
+            value={accountName}
+            onChange={(e) => setAccountName(e.target.value)}
+            className={`bg-black/40 border-white/20 text-white ${
+              accountName.trim() ? 'border-green-400/50' : ''
+            }`}
+            required
+          />
+          {accountName.trim() && (
+            <p className="text-xs text-green-300 mt-1">✓ Account name entered</p>
+          )}
         </div>
 
         <Button 
           onClick={handleSubmit}
-          disabled={isSubmitting || !amount || !accountDetails || amount > user.chips}
+          disabled={isSubmitting || !amount || !accountNumber || !accountName || amount > user.chips}
           className="w-full bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600"
         >
           {isSubmitting ? (
@@ -857,7 +1134,9 @@ const WalletTransactionHistory = ({ transactions }: any) => {
             >
               <div className="flex justify-between items-start">
                 <div className="flex-1">
-                  <p className="font-medium text-white text-sm">{transaction.description || 'Transaction'}</p>
+                  <p className="font-medium text-white text-sm">
+                    {(transaction.description || 'Transaction').replace(/\s*-\s*null\s*$/i, '')}
+                  </p>
                   <p className="text-xs text-gray-400">
                     {transaction.created_at ? new Date(transaction.created_at).toLocaleString() : 'Unknown date'}
                   </p>

@@ -1,69 +1,132 @@
+
 import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, CreditCard, Smartphone, Home, TreePine, Gamepad2, Wallet } from "lucide-react";
-import { Link } from "react-router-dom";
-import { signIn, createTopupRequest } from '@/lib/database'
-import { supabase } from '@/lib/supabase'
-import { CheckelsIcon, ChipsIcon } from "@/components/ui/icons";
+import { 
+  CreditCard, 
+  Upload, 
+  History, 
+  Home, 
+  Gamepad2, 
+  Wallet,
+  DollarSign,
+  Download,
+  CheckCircle,
+  Clock,
+  XCircle
+} from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { 
+  signIn, 
+  createTopupRequest, 
+  createWithdrawalRequest,
+  getUserWithdrawals,
+  updateUserBalance,
+  addTransaction
+} from '@/lib/database';
+import { supabase } from '@/lib/supabase';
+import { ChipsIcon } from "@/components/ui/icons";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const TopUpPage = () => {
+const TopUpWithdrawPage = () => {
   const [user, setUser] = useState<any>(null);
-  const [amount, setAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [receipt, setReceipt] = useState<File | null>(null);
-  const [reference, setReference] = useState('');
-  const [notes, setNotes] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [topupRequests, setTopupRequests] = useState<any[]>([]);
+  const [withdrawalRequests, setWithdrawalRequests] = useState<any[]>([]);
   const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // TopUp form state
+  const [topupAmount, setTopupAmount] = useState<number>(0);
+  const [paymentMethod, setPaymentMethod] = useState<string>('gcash');
+  const [referenceNumber, setReferenceNumber] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Withdraw form state
+  const [withdrawAmount, setWithdrawAmount] = useState<number>(0);
+  const [accountName, setAccountName] = useState<string>('');
+  const [accountNumber, setAccountNumber] = useState<string>('');
+  const [bankName, setBankName] = useState<string>('gcash');
 
   useEffect(() => {
-    const loadUserData = async () => {
-      const savedUser = localStorage.getItem('casinoUser');
+    const loadUserAndData = async () => {
+      setIsLoading(true);
+      const savedUser = localStorage.getItem("casinoUser");
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
-        setUser(parsedUser);
 
-        // Sync with Supabase to get latest data
         try {
           const freshUser = await signIn(parsedUser.username, parsedUser.password_hash || 'migrated_user');
+
+          if (freshUser.is_banned) {
+            toast({
+              title: "Account Banned",
+              description: "Your account has been banned. Redirecting to login.",
+              variant: "destructive",
+            });
+            localStorage.removeItem('casinoUser');
+            setTimeout(() => navigate('/'), 2000);
+            return;
+          }
+
           localStorage.setItem('casinoUser', JSON.stringify(freshUser));
           setUser(freshUser);
+
+          // Load user's withdrawal history
+          const withdrawals = await getUserWithdrawals(freshUser.id);
+          setWithdrawalRequests(withdrawals);
+
+          toast({
+            title: "Welcome!",
+            description: `TopUp & Withdraw page loaded for ${freshUser.username}`,
+          });
+
         } catch (error) {
-          console.log('Using localStorage data, Supabase sync failed');
+          console.log('Failed to load user from Supabase:', error);
+          toast({
+            title: "Connection Error",
+            description: "Failed to sync with database. Redirecting to login.",
+            variant: "destructive",
+          });
+          localStorage.removeItem('casinoUser');
+          setTimeout(() => navigate('/'), 2000);
         }
       } else {
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 100);
+        navigate('/');
       }
+      setIsLoading(false);
     };
 
-    loadUserData();
-  }, []);
+    loadUserAndData();
+  }, [toast, navigate]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setReceipt(file);
-    }
+  const uploadReceipt = async (file: File): Promise<string> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}.${fileExt}`;
+
+    const { data, error } = await supabase.storage
+      .from('receipts')
+      .upload(fileName, file);
+
+    if (error) throw error;
+
+    const { data: publicUrlData } = supabase.storage
+      .from('receipts')
+      .getPublicUrl(fileName);
+
+    return publicUrlData.publicUrl;
   };
 
-  const handleSubmitTopUp = async () => {
-    if (!amount || !paymentMethod || !receipt || !reference) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill all required fields and upload receipt",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const chipsAmount = parseFloat(amount);
-    if (isNaN(chipsAmount) || chipsAmount <= 0) {
+  const handleTopUpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (topupAmount <= 0) {
       toast({
         title: "Invalid Amount",
         description: "Please enter a valid amount",
@@ -72,99 +135,201 @@ const TopUpPage = () => {
       return;
     }
 
-    if (chipsAmount < 10) {
+    if (!referenceNumber.trim()) {
       toast({
-        title: "Minimum Top-up Required",
-        description: "Minimum top-up amount is 10 chips (₱100)",
+        title: "Missing Reference",
+        description: "Please enter a reference number",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!receiptFile) {
+      toast({
+        title: "Missing Receipt",
+        description: "Please upload a receipt",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Upload receipt to storage
+      const receiptUrl = await uploadReceipt(receiptFile);
+
+      // Create topup request
+      await createTopupRequest({
+        user_id: user.id,
+        username: user.username,
+        amount: topupAmount,
+        payment_method: paymentMethod,
+        reference_number: referenceNumber,
+        notes: notes,
+        receipt_data: receiptUrl,
+        status: 'pending'
+      });
+
+      toast({
+        title: "TopUp Request Submitted",
+        description: "Your request has been submitted for admin approval",
+      });
+
+      // Reset form
+      setTopupAmount(0);
+      setReferenceNumber('');
+      setNotes('');
+      setReceiptFile(null);
+
+    } catch (error) {
+      console.error('Error submitting topup request:', error);
+      toast({
+        title: "Submission Failed",
+        description: "Failed to submit topup request. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleWithdrawalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (withdrawAmount <= 0) {
+      toast({
+        title: "Invalid Amount",
+        description: "Please enter a valid amount",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (withdrawAmount > user.chips) {
+      toast({
+        title: "Insufficient Balance",
+        description: "You don't have enough chips",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!accountName.trim() || !accountNumber.trim()) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in all account details",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      toast({
-        title: "Uploading Receipt",
-        description: "Please wait while we process your request...",
+      const phpAmount = withdrawAmount * 10; // 1 chip = 10 PHP
+
+      // Deduct chips from user balance
+      const updatedUser = await updateUserBalance(user.id, {
+        chips: user.chips - withdrawAmount
       });
 
-      // Upload receipt to Supabase storage
-      const fileExt = receipt.name.split('.').pop();
-      const fileName = `${user.id}_${Date.now()}.${fileExt}`;
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('receipts')
-        .upload(fileName, receipt);
-
-      if (uploadError) {
-        throw new Error(`Failed to upload receipt: ${uploadError.message}`);
-      }
-
-      // Get public URL for the uploaded receipt
-      const { data: publicUrlData } = supabase.storage
-        .from('receipts')
-        .getPublicUrl(fileName);
-
-      const topUpRequestData = {
+      // Create withdrawal request
+      await createWithdrawalRequest({
         user_id: user.id,
         username: user.username,
-        amount: chipsAmount,
-        payment_method: paymentMethod,
-        reference_number: reference,
-        notes,
-        receipt_name: receipt.name,
-        receipt_url: publicUrlData.publicUrl,
-        status: 'pending'
-      };
+        amount: withdrawAmount,
+        php_amount: phpAmount,
+        account_name: accountName,
+        account_number: accountNumber,
+        bank_name: bankName,
+        account_details: `${bankName}: ${accountNumber}`
+      });
 
-      // Save to database
-      const success = await createTopupRequest(topUpRequestData);
+      // Add transaction record
+      await addTransaction({
+        user_id: user.id,
+        type: 'withdrawal',
+        amount: -withdrawAmount,
+        description: `Withdrawal: ${withdrawAmount} chips to ${bankName}`,
+        php_amount: phpAmount
+      });
 
-      if (success) {
-        toast({
-          title: "Top-up Request Submitted",
-          description: `₱${(chipsAmount * 10).toFixed(2)} top-up request sent for admin approval`,
-        });
+      setUser(updatedUser);
+      localStorage.setItem('casinoUser', JSON.stringify(updatedUser));
 
-        // Reset form
-        setAmount('');
-        setPaymentMethod('');
-        setReceipt(null);
-        setReference('');
-        setNotes('');
-      } else {
-        throw new Error('Failed to save top-up request');
-      }
-    } catch (error) {
-      console.error('Error submitting top-up request:', error);
+      // Reload withdrawal history
+      const withdrawals = await getUserWithdrawals(user.id);
+      setWithdrawalRequests(withdrawals);
+
       toast({
-        title: "Error",
-        description: `Failed to submit top-up request: ${error.message}`,
+        title: "Withdrawal Processed",
+        description: `₱${phpAmount.toFixed(2)} has been processed for withdrawal`,
+      });
+
+      // Reset form
+      setWithdrawAmount(0);
+      setAccountName('');
+      setAccountNumber('');
+
+    } catch (error) {
+      console.error('Error processing withdrawal:', error);
+      toast({
+        title: "Withdrawal Failed",
+        description: "Failed to process withdrawal. Please try again.",
         variant: "destructive",
       });
     }
   };
 
+  const generateMockReceipt = (withdrawal: any) => {
+    const receiptHTML = `
+      <div style="font-family: Arial, sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; border: 1px solid #ccc;">
+        <h2 style="text-align: center; color: #333;">WITHDRAWAL RECEIPT</h2>
+        <hr>
+        <p><strong>Transaction ID:</strong> ${withdrawal.id}</p>
+        <p><strong>Date:</strong> ${new Date(withdrawal.created_at).toLocaleString()}</p>
+        <p><strong>Amount:</strong> ${withdrawal.amount} chips</p>
+        <p><strong>PHP Amount:</strong> ₱${withdrawal.php_amount.toFixed(2)}</p>
+        <p><strong>Account Name:</strong> ${withdrawal.account_name}</p>
+        <p><strong>Account Number:</strong> ${withdrawal.account_number}</p>
+        <p><strong>Bank/Method:</strong> ${withdrawal.bank_name}</p>
+        <hr>
+        <p style="text-align: center; font-size: 12px; color: #666;">
+          This is a demo receipt for testing purposes only
+        </p>
+      </div>
+    `;
+
+    const newWindow = window.open('', '_blank');
+    if (newWindow) {
+      newWindow.document.write(receiptHTML);
+      newWindow.document.close();
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 flex items-center justify-center">
+        <div className="flex items-center space-x-2 text-white">
+          <div className="w-6 h-6 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
+          <span>Loading...</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
-      <header className="bg-gradient-to-r from-indigo-800/90 to-purple-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-pink-900 text-white">
+      <header className="bg-gradient-to-r from-blue-800/90 to-purple-800/90 backdrop-blur-lg border-b border-white/10 p-4 shadow-xl">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-white flex items-center space-x-3">
-            <CreditCard className="w-8 h-8 text-purple-400" />
-            <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-              Top Up Chips
+          <h1 className="text-3xl font-bold text-white">
+            <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              TopUp & Withdraw
             </span>
           </h1>
           <div className="flex items-center space-x-6">
             <div className="flex items-center space-x-4 bg-black/20 rounded-full px-4 py-2 border border-white/10">
-              <div className="flex items-center space-x-2">
-                <CheckelsIcon className="w-5 h-5 text-yellow-400" />
-                <span className="text-yellow-100 font-semibold">
-                  {(user?.coins || 0).toFixed(2)} ₵ Checkels
-                </span>
-              </div>
-              <div className="w-px h-6 bg-white/20"></div>
               <div className="flex items-center space-x-2">
                 <ChipsIcon className="w-5 h-5 text-green-400" />
                 <span className="text-green-100 font-semibold">
@@ -176,21 +341,33 @@ const TopUpPage = () => {
               <span className="text-white/90 font-medium">Welcome, {user?.username}</span>
               <div className="flex space-x-2">
                 <Link to="/">
-                  <Button variant="outline" size="sm" className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-blue-500/20 border-blue-400/30 text-blue-100 hover:bg-blue-500/30"
+                  >
                     <Home className="w-4 h-4" />
                     <span>Home</span>
                   </Button>
                 </Link>
-                <Link to="/wallet">
-                  <Button variant="outline" size="sm" className="flex items-center space-x-2 bg-green-500/20 border-green-400/30 text-green-100 hover:bg-green-500/30">
-                    <Wallet className="w-4 h-4" />
-                    <span>Wallet</span>
-                  </Button>
-                </Link>
                 <Link to="/casino">
-                  <Button variant="outline" size="sm" className="flex items-center space-x-2 bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-purple-500/20 border-purple-400/30 text-purple-100 hover:bg-purple-500/30"
+                  >
                     <Gamepad2 className="w-4 h-4" />
                     <span>Casino</span>
+                  </Button>
+                </Link>
+                <Link to="/wallet">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 bg-indigo-500/20 border-indigo-400/30 text-indigo-100 hover:bg-indigo-500/30"
+                  >
+                    <Wallet className="w-4 h-4" />
+                    <span>Wallet</span>
                   </Button>
                 </Link>
               </div>
@@ -200,108 +377,241 @@ const TopUpPage = () => {
       </header>
 
       <div className="max-w-4xl mx-auto p-6">
-        <Card className="bg-gradient-to-br from-green-50 to-blue-50 border-green-200 shadow-lg">
-          <CardHeader>
-            <CardTitle className="text-green-700 flex items-center space-x-2">
-              <CreditCard className="w-6 h-6" />
-              <span>Buy Casino Chips</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="p-4 bg-gradient-to-r from-white to-gray-50 rounded-lg border shadow-sm">
-              <div className="text-center mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="font-bold text-xl text-blue-700">1 Chip = ₱10 PHP</p>
-                <p className="text-sm text-blue-600 mt-1">Minimum top-up: 10 chips (₱100)</p>
-                <p className="text-sm text-blue-600">Current balance: {user?.chips?.toFixed(2) || 0} chips</p>
-              </div>
+        <Tabs defaultValue="topup" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="topup">TopUp Chips</TabsTrigger>
+            <TabsTrigger value="withdraw">Withdraw Chips</TabsTrigger>
+            <TabsTrigger value="history">Transaction History</TabsTrigger>
+          </TabsList>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-700">Chips Amount *</label>
-                  <Input
-                    type="number"
-                    min="10"
-                    step="1"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="Enter chips amount (minimum 10)"
-                    className="w-full"
-                  />
-                  {amount && (
-                    <p className="text-sm text-gray-600 mt-1">
-                      Total: ₱{(parseFloat(amount) * 10 || 0).toFixed(2)} PHP
+          <TabsContent value="topup" className="space-y-4">
+            <Card className="bg-black/20 border border-white/10">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <CreditCard className="w-6 h-6 text-green-400" />
+                  <span>TopUp Chips</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleTopUpSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Amount (Chips)</label>
+                    <Input
+                      type="number"
+                      value={topupAmount}
+                      onChange={(e) => setTopupAmount(Number(e.target.value))}
+                      placeholder="Enter amount of chips"
+                      className="bg-black/40 border-white/20 text-white"
+                      min="1"
+                      required
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      PHP Amount: ₱{(topupAmount * 10).toFixed(2)} (1 chip = ₱10)
                     </p>
-                  )}
-                </div>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-700">Payment Method *</label>
-                  <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select payment method" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="credit_card">Credit/Debit Card</SelectItem>
-                      <SelectItem value="paymaya">PayMaya</SelectItem>
-                      <SelectItem value="gcash">GCash</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Payment Method</label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      className="w-full p-2 bg-black/40 border border-white/20 rounded text-white"
+                    >
+                      <option value="gcash">GCash</option>
+                      <option value="paymaya">PayMaya</option>
+                      <option value="credit_card">Credit Card</option>
+                      <option value="debit_card">Debit Card</option>
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-700">Payment Reference Number *</label>
-                  <Input
-                    value={reference}
-                    onChange={(e) => setReference(e.target.value)}
-                    placeholder="Enter transaction reference number"
-                    className="w-full"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Reference Number</label>
+                    <Input
+                      type="text"
+                      value={referenceNumber}
+                      onChange={(e) => setReferenceNumber(e.target.value)}
+                      placeholder="Enter transaction reference number"
+                      className="bg-black/40 border-white/20 text-white"
+                      required
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-700">Payment Receipt * (Image)</label>
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
-                    <input
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Upload Receipt</label>
+                    <Input
                       type="file"
                       accept="image/*"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                      id="receipt-upload"
+                      onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+                      className="bg-black/40 border-white/20 text-white"
+                      required
                     />
-                    <label htmlFor="receipt-upload" className="cursor-pointer flex flex-col items-center space-y-2">
-                      <Upload className="w-8 h-8 text-gray-400" />
-                      <span className="text-sm text-gray-600">
-                        {receipt ? receipt.name : "Click to upload receipt image"}
-                      </span>
-                    </label>
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-700">Additional Notes</label>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Any additional information..."
-                    className="w-full"
-                    rows={3}
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Notes (Optional)</label>
+                    <Textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Additional notes"
+                      className="bg-black/40 border-white/20 text-white"
+                    />
+                  </div>
 
-                <Button 
-                  onClick={handleSubmitTopUp}
-                  className="w-full py-3 text-lg bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
-                  disabled={!amount || !paymentMethod || !receipt || !reference || parseFloat(amount) < 10}
-                >
-                  Submit Top-up Request
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+                  <Button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full bg-green-600 hover:bg-green-700"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent animate-spin rounded-full mr-2"></div>
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Submit TopUp Request
+                      </>
+                    )}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="withdraw" className="space-y-4">
+            <Card className="bg-black/20 border border-white/10">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Download className="w-6 h-6 text-blue-400" />
+                  <span>Withdraw Chips</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleWithdrawalSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Amount (Chips)</label>
+                    <Input
+                      type="number"
+                      value={withdrawAmount}
+                      onChange={(e) => setWithdrawAmount(Number(e.target.value))}
+                      placeholder="Enter amount of chips"
+                      className="bg-black/40 border-white/20 text-white"
+                      min="1"
+                      max={user.chips}
+                      required
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      PHP Amount: ₱{(withdrawAmount * 10).toFixed(2)} | Available: {user.chips} chips
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Bank/Method</label>
+                    <select
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      className="w-full p-2 bg-black/40 border border-white/20 rounded text-white"
+                    >
+                      <option value="gcash">GCash</option>
+                      <option value="paymaya">PayMaya</option>
+                      <option value="bpi">BPI</option>
+                      <option value="bdo">BDO</option>
+                      <option value="metrobank">Metrobank</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Account Name</label>
+                    <Input
+                      type="text"
+                      value={accountName}
+                      onChange={(e) => setAccountName(e.target.value)}
+                      placeholder="Enter account holder name"
+                      className="bg-black/40 border-white/20 text-white"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Account Number</label>
+                    <Input
+                      type="text"
+                      value={accountNumber}
+                      onChange={(e) => setAccountNumber(e.target.value)}
+                      placeholder="Enter account number"
+                      className="bg-black/40 border-white/20 text-white"
+                      required
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Process Withdrawal
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-4">
+            <Card className="bg-black/20 border border-white/10">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <History className="w-6 h-6 text-purple-400" />
+                  <span>Withdrawal History</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {withdrawalRequests.length === 0 ? (
+                  <div className="text-center py-8">
+                    <DollarSign className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-400">No withdrawal history yet</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {withdrawalRequests.map((withdrawal) => (
+                      <div key={withdrawal.id} className="border rounded-lg p-4 bg-white/5">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <p className="font-semibold">
+                              {withdrawal.amount} chips → ₱{withdrawal.php_amount.toFixed(2)}
+                            </p>
+                            <p className="text-sm text-gray-400">
+                              {withdrawal.bank_name} - {withdrawal.account_number}
+                            </p>
+                          </div>
+                          <Badge className="bg-green-100 text-green-800">
+                            {withdrawal.status}
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <p className="text-xs text-gray-500">
+                            {new Date(withdrawal.created_at).toLocaleString()}
+                          </p>
+                          <Button
+                            onClick={() => generateMockReceipt(withdrawal)}
+                            size="sm"
+                            variant="outline"
+                            className="border-blue-400 text-blue-400 hover:bg-blue-50"
+                          >
+                            View Receipt
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
 };
 
-export default TopUpPage;
+export default TopUpWithdrawPage;
