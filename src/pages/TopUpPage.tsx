@@ -47,6 +47,8 @@ const TopUpWithdrawPage = () => {
   const [notes, setNotes] = useState<string>('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastSubmissionTime, setLastSubmissionTime] = useState<number>(0);
+  const [submissionLock, setSubmissionLock] = useState<boolean>(false);
 
   // Withdraw form state
   const [withdrawAmount, setWithdrawAmount] = useState<number>(0);
@@ -125,6 +127,31 @@ const TopUpWithdrawPage = () => {
 
   const handleTopUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    
+    const now = Date.now();
+    
+    // Multiple layers of double submission prevention
+    if (isSubmitting || submissionLock) {
+      console.log('Form submission blocked - already in progress');
+      return;
+    }
+    
+    // Prevent rapid successive submissions (debounce)
+    if (now - lastSubmissionTime < 3000) {
+      console.log('Too soon since last submission');
+      toast({
+        title: "Please Wait",
+        description: "Please wait before submitting again",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Set both locks immediately
+    setIsSubmitting(true);
+    setSubmissionLock(true);
+    setLastSubmissionTime(now);
     
     if (topupAmount <= 0) {
       toast({
@@ -181,6 +208,12 @@ const TopUpWithdrawPage = () => {
       setReferenceNumber('');
       setNotes('');
       setReceiptFile(null);
+      
+      // Reset file input
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+      if (fileInput) {
+        fileInput.value = '';
+      }
 
     } catch (error) {
       console.error('Error submitting topup request:', error);
@@ -191,6 +224,10 @@ const TopUpWithdrawPage = () => {
       });
     } finally {
       setIsSubmitting(false);
+      // Delay removing submission lock to prevent rapid resubmission
+      setTimeout(() => {
+        setSubmissionLock(false);
+      }, 1000);
     }
   };
 
@@ -394,6 +431,7 @@ const TopUpWithdrawPage = () => {
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleTopUpSubmit} className="space-y-4">
+                  <fieldset disabled={isSubmitting || submissionLock}>
                   <div>
                     <label className="block text-sm font-medium mb-2">Amount (Chips)</label>
                     <Input
@@ -459,7 +497,7 @@ const TopUpWithdrawPage = () => {
 
                   <Button
                     type="submit"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || submissionLock}
                     className="w-full bg-green-600 hover:bg-green-700"
                   >
                     {isSubmitting ? (
@@ -474,6 +512,7 @@ const TopUpWithdrawPage = () => {
                       </>
                     )}
                   </Button>
+                  </fieldset>
                 </form>
               </CardContent>
             </Card>

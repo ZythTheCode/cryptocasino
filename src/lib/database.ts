@@ -197,6 +197,7 @@ export async function createWithdrawalRequest(requestData: {
     payment_method: requestData.payment_method.trim(),
     account_number: requestData.account_number.trim(),
     account_name: requestData.account_name.trim(),
+    bank_name: requestData.payment_method.trim(), // Use payment_method as bank_name
     account_details: accountDetails,
     status: requestData.status || 'pending',
     php_amount: Number(requestData.amount) * 10 // Calculate PHP amount (1 chip = 10 PHP)
